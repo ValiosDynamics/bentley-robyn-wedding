@@ -328,6 +328,14 @@ export default function App() {
 
   useEffect(() => setTl(tLeft(cfg.event_date_iso)), [cfg.event_date_iso]);
 
+  useEffect(() => {
+    try {
+      const d = new Date(cfg.event_date_iso);
+      const monthYear = d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+      document.title = `Bentley & Robyn — ${monthYear}`;
+    } catch (e) { /* ignore bad date */ }
+  }, [cfg.event_date_iso]);
+
   async function loadAll() {
     setLoading(true);
     try {
