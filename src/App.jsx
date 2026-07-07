@@ -255,8 +255,12 @@ export default function App() {
 
   async function addGuest() {
     const name = newGuest.name.trim();
-    if (!name || !newGuest.email.trim()) return;
-    const { data } = await supabase.from("guests").insert({ name, email: newGuest.email.trim(), phone: newGuest.phone.trim() || null }).select().single();
+    if (!name) return;
+    const { data } = await supabase.from("guests").insert({
+      name,
+      email: newGuest.email.trim() || "",
+      phone: newGuest.phone.trim() || null,
+    }).select().single();
     if (data) setGuests(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
     setNewGuest({ name: "", email: "", phone: "" });
   }
@@ -381,8 +385,9 @@ export default function App() {
               <h2>Guest List — {guests.length} invited</h2>
               <div className="add-row">
                 <input className="fi" placeholder="Full name..." value={newGuest.name}
-                  onChange={e => setNewGuest({ ...newGuest, name: e.target.value })} />
-                <input className="fi" placeholder="Email" value={newGuest.email}
+                  onChange={e => setNewGuest({ ...newGuest, name: e.target.value })}
+                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addGuest(); } }} />
+                <input className="fi" placeholder="Email (optional — they'll add it when they RSVP)" value={newGuest.email}
                   onChange={e => setNewGuest({ ...newGuest, email: e.target.value })} />
                 <input className="fi" placeholder="Phone (optional)" value={newGuest.phone}
                   onChange={e => setNewGuest({ ...newGuest, phone: e.target.value })} />
