@@ -13,9 +13,54 @@ const EQ = Array.from({ length: 32 }, (_, i) => ({
   a: `eq${(i%5)+1}`, d: `${(0.65+(i*0.14)%0.95).toFixed(2)}s`, dl: `${-((i*0.21)%1.5).toFixed(2)}s`
 }));
 
+function toGCalDate(date) {
+  return date.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+}
+
+function buildGCalLink(cfg) {
+  const start = new Date(cfg.event_date_iso);
+  const end = new Date(start.getTime() + 6 * 60 * 60 * 1000); // assume 6-hour event
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: "Bentley & Robyn's Wedding",
+    dates: `${toGCalDate(start)}/${toGCalDate(end)}`,
+    details: `${cfg.venue_name} — doors at ${cfg.doors_time}. Can't wait to dance with you!`,
+    location: cfg.map_address || cfg.venue_address || cfg.venue_name,
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function downloadICS(cfg) {
+  const start = new Date(cfg.event_date_iso);
+  const end = new Date(start.getTime() + 6 * 60 * 60 * 1000);
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Bentley & Robyn Wedding//EN",
+    "BEGIN:VEVENT",
+    `UID:${Date.now()}@bestfriends4eva.fun`,
+    `DTSTAMP:${toGCalDate(new Date())}`,
+    `DTSTART:${toGCalDate(start)}`,
+    `DTEND:${toGCalDate(end)}`,
+    "SUMMARY:Bentley & Robyn's Wedding",
+    `DESCRIPTION:${cfg.venue_name} — doors at ${cfg.doors_time}. Can't wait to dance with you!`,
+    `LOCATION:${cfg.map_address || cfg.venue_address || cfg.venue_name}`,
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\r\n");
+  const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "bentley-and-robyn-wedding.ics";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+
 const DEF_CFG = {
   event_date_display: "June 2027", event_date_iso: "2027-06-19T17:00:00-07:00",
-  venue_name: "Kelowna, BC", venue_address: "Venue TBD — stay tuned",
+  venue_name: "Kelowna, BC", venue_address: "Venue TBD — stay tuned", map_address: "",
   doors_time: "5:00 PM", photo_album_link: "", guest_password: "dancefloor2027", admin_password: "bestfriends4eva",
 };
 
@@ -78,6 +123,13 @@ const CSS = `
   .dv{font-family:'Fraunces',serif;font-size:26px;font-weight:700;margin-bottom:5px;}
   .ds{font-size:13px;color:#6B6975;}
   .dn{background:rgba(255,107,53,.06);border:1px solid rgba(255,107,53,.18);border-radius:14px;padding:20px 22px;}
+
+  .cal-row{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px;}
+  .cal-btn{display:inline-flex;align-items:center;gap:8px;background:#FF6B35;color:white;text-decoration:none;border:none;border-radius:10px;padding:13px 22px;font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;transition:background .2s,transform .15s;box-shadow:0 3px 12px rgba(255,107,53,.25);}
+  .cal-btn:hover{background:#e55924;transform:translateY(-1px);}
+  .cal-btn-ghost{background:white;color:#1C1A22;border:1px solid rgba(28,26,34,.15);box-shadow:none;}
+  .cal-btn-ghost:hover{background:#F7F4EF;border-color:rgba(28,26,34,.3);transform:none;}
+  .map-wrap{margin-top:28px;border-radius:16px;overflow:hidden;border:1px solid rgba(28,26,34,.08);box-shadow:0 2px 8px rgba(28,26,34,.06);}
 
   .photo-btn{display:inline-flex;align-items:center;gap:10px;background:#1C1A22;color:white;text-decoration:none;border-radius:12px;padding:18px 32px;font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;transition:background .2s,transform .15s;}
   .photo-btn:hover{background:#3C3A42;transform:translateY(-2px);}
@@ -441,7 +493,8 @@ export default function App() {
                   ["Date (shown on site)", "event_date_display", "e.g. June 19, 2027"],
                   ["Date (ISO for countdown)", "event_date_iso", "e.g. 2027-06-19T17:00:00-07:00"],
                   ["Venue Name", "venue_name", "e.g. Rutland Centennial Hall"],
-                  ["Venue Address", "venue_address", "e.g. 765 Doyle Ave, Kelowna"],
+                  ["Venue Address (shown on site)", "venue_address", "e.g. 765 Doyle Ave, Kelowna"],
+                  ["Map Address (for Google Maps — real address)", "map_address", "e.g. 765 Doyle Ave, Kelowna, BC V1Y 4H3"],
                   ["Doors Time", "doors_time", "e.g. 5:00 PM"],
                   ["Photo Album Link", "photo_album_link", "https://photos.google.com/..."],
                   ["Guest RSVP Password", "guest_password", "What guests enter to RSVP"],
@@ -703,6 +756,25 @@ export default function App() {
               Whatever you want to dance in. Nice casual is the vibe — leave the heels at home if you actually plan to move.
             </p>
           </div>
+
+          <div className="cal-row">
+            <a className="cal-btn" href={buildGCalLink(cfg)} target="_blank" rel="noopener noreferrer">📅 Add to Google Calendar</a>
+            <button className="cal-btn cal-btn-ghost" onClick={() => downloadICS(cfg)}>⬇ Download .ics (Apple / Outlook)</button>
+          </div>
+
+          {cfg.map_address ? (
+            <div className="map-wrap">
+              <iframe
+                title="Venue location"
+                src={`https://www.google.com/maps?q=${encodeURIComponent(cfg.map_address)}&output=embed`}
+                width="100%"
+                height="320"
+                style={{ border: 0 }}
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+              />
+            </div>
+          ) : null}
         </div>
       </section>
 
