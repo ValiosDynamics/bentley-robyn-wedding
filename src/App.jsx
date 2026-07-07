@@ -82,9 +82,10 @@ const CSS = `
   .photo-btn{display:inline-flex;align-items:center;gap:10px;background:#1C1A22;color:white;text-decoration:none;border-radius:12px;padding:18px 32px;font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;transition:background .2s,transform .15s;}
   .photo-btn:hover{background:#3C3A42;transform:translateY(-2px);}
 
-  .gl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;}
-  .gl-card{background:white;border:1px solid rgba(28,26,34,.08);border-radius:12px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 1px 4px rgba(28,26,34,.04);gap:10px;}
-  .gl-name{font-size:14px;font-weight:600;color:#1C1A22;flex:1;}
+  .gl-list{display:flex;flex-direction:column;gap:8px;}
+  .gl-row{background:white;border:1px solid rgba(28,26,34,.08);border-radius:12px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 1px 4px rgba(28,26,34,.04);gap:10px;flex-wrap:wrap;}
+  .gl-name{font-size:14px;font-weight:600;color:#1C1A22;flex:1;min-width:140px;}
+  .gl-relation{font-size:13px;font-weight:400;color:#9A98A4;}
   .gl-badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;flex-shrink:0;}
   .gb-y{background:rgba(34,197,94,.1);color:#16a34a;}
   .gb-n{background:rgba(239,68,68,.1);color:#dc2626;}
@@ -217,14 +218,14 @@ export default function App() {
 
   const [pwIn, setPwIn] = useState("");
   const [pwErr, setPwErr] = useState(false);
-  const [newGuest, setNewGuest] = useState({ name: "", email: "", phone: "" });
+  const [newGuest, setNewGuest] = useState({ name: "", relation: "", email: "", phone: "" });
   const [cfgSaved, setCfgSaved] = useState(false);
 
   const [modal, setModal] = useState(null);
   const [mStep, setMStep] = useState("pw"); // pw | form | done
   const [mPw, setMPw] = useState("");
   const [mPwErr, setMPwErr] = useState(false);
-  const [mForm, setMForm] = useState({ email: "", phone: "", attending: "coming", note: "" });
+  const [mForm, setMForm] = useState({ email: "", phone: "", attending: "coming", note: "", relation: "" });
   const [wantP1, setWantP1] = useState(false);
   const [p1Name, setP1Name] = useState("");
   const [mLoading, setMLoading] = useState(false);
@@ -232,6 +233,7 @@ export default function App() {
   const [photos, setPhotos] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState(null); // {type:'ok'|'err', text}
+  const [guestSearch, setGuestSearch] = useState("");
 
   async function loadPhotos() {
     const { data, error } = await supabase.storage.from("wedding-photos").list("", { sortBy: { column: "created_at", order: "desc" } });
@@ -304,11 +306,12 @@ export default function App() {
     if (!name) return;
     const { data } = await supabase.from("guests").insert({
       name,
+      relation: newGuest.relation.trim() || "",
       email: newGuest.email.trim() || "",
       phone: newGuest.phone.trim() || null,
     }).select().single();
     if (data) setGuests(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
-    setNewGuest({ name: "", email: "", phone: "" });
+    setNewGuest({ name: "", relation: "", email: "", phone: "" });
   }
 
   async function removeGuest(id) {
@@ -332,7 +335,7 @@ export default function App() {
     setModal(guest);
     setMStep("pw");
     setMPw(""); setMPwErr(false);
-    setMForm({ email: guest.email || "", phone: guest.phone || "", attending: guest.rsvp_status === "not_coming" ? "not_coming" : "coming", note: guest.note || "" });
+    setMForm({ email: guest.email || "", phone: guest.phone || "", attending: guest.rsvp_status === "not_coming" ? "not_coming" : "coming", note: guest.note || "", relation: guest.relation || "" });
     setWantP1(false); setP1Name("");
     setMLoading(false);
   }
@@ -348,7 +351,7 @@ export default function App() {
     setMLoading(true);
     try {
       await supabase.from("guests").update({
-        rsvp_status: mForm.attending, email: mForm.email, phone: mForm.phone || null, note: mForm.note || null,
+        rsvp_status: mForm.attending, email: mForm.email, phone: mForm.phone || null, note: mForm.note || null, relation: mForm.relation || "",
       }).eq("id", modal.id);
       if (wantP1 && p1Name.trim()) {
         await supabase.from("plus_one_requests").insert({ requested_by_name: modal.name, plus_one_name: p1Name.trim() });
@@ -433,6 +436,8 @@ export default function App() {
                 <input className="fi" placeholder="Full name..." value={newGuest.name}
                   onChange={e => setNewGuest({ ...newGuest, name: e.target.value })}
                   onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addGuest(); } }} />
+                <input className="fi" placeholder="Relation (e.g. Boss ass bitch)" value={newGuest.relation}
+                  onChange={e => setNewGuest({ ...newGuest, relation: e.target.value })} />
                 <input className="fi" placeholder="Email (optional — they'll add it when they RSVP)" value={newGuest.email}
                   onChange={e => setNewGuest({ ...newGuest, email: e.target.value })} />
                 <input className="fi" placeholder="Phone (optional)" value={newGuest.phone}
@@ -442,7 +447,7 @@ export default function App() {
               {guests.length === 0 && <p className="adm-empty">No guests yet. Add them above — they'll appear on the public list as ⏳ Pending until they RSVP.</p>}
               {guests.map(g => (
                 <div key={g.id} className="gt-row">
-                  <span className="gt-n">{g.name}</span>
+                  <span className="gt-n">{g.name}{g.relation ? <span style={{ color: "#9A98A4", fontWeight: 400 }}> · {g.relation}</span> : null}</span>
                   <span className={`gt-b ${g.rsvp_status === "coming" ? "st-y" : g.rsvp_status === "not_coming" ? "st-n" : "st-p"}`}>
                     {g.rsvp_status === "coming" ? "✓ Coming" : g.rsvp_status === "not_coming" ? "✗ Can't make it" : "⏳ Pending"}
                   </span>
@@ -513,6 +518,11 @@ export default function App() {
                   <label className="fl">Email</label>
                   <input className="fi" type="email" placeholder="email@example.com" value={mForm.email} required
                     onChange={e => setMForm({ ...mForm, email: e.target.value })} />
+                </div>
+                <div className="fg">
+                  <label className="fl">Your relation to us (feel free to change it 😏)</label>
+                  <input className="fi" placeholder="e.g. Best Man, Cousin, ur worst enemy"
+                    value={mForm.relation} onChange={e => setMForm({ ...mForm, relation: e.target.value })} />
                 </div>
                 <div className="fg">
                   <label className="fl">Phone (optional)</label>
@@ -694,19 +704,35 @@ export default function App() {
           <div className="wi">
             <p className="ey">who's coming</p>
             <h2 className="st">The guest list.</h2>
-            <div className="gl-grid">
-              {guests.map(g => (
-                <div key={g.id} className="gl-card">
-                  <span className="gl-name">{g.name}</span>
-                  <span className={`gl-badge ${g.rsvp_status === "coming" ? "gb-y" : g.rsvp_status === "not_coming" ? "gb-n" : "gb-p"}`}>
-                    {g.rsvp_status === "coming" ? "💃 Coming" : g.rsvp_status === "not_coming" ? "🥺 Can't make it" : "⏳ Pending"}
-                  </span>
-                  {g.rsvp_status === "pending"
-                    ? <button className="rsvp-btn" onClick={() => openModal(g)}>RSVP →</button>
-                    : <button className="rsvp-btn-done" onClick={() => openModal(g)}>Update</button>
-                  }
-                </div>
-              ))}
+            <input
+              className="fi"
+              style={{ marginBottom: 20 }}
+              placeholder="🔍 Search the guest list..."
+              value={guestSearch}
+              onChange={e => setGuestSearch(e.target.value)}
+            />
+            <div className="gl-list">
+              {guests
+                .filter(g => {
+                  const q = guestSearch.trim().toLowerCase();
+                  if (!q) return true;
+                  return g.name.toLowerCase().includes(q) || (g.relation || "").toLowerCase().includes(q);
+                })
+                .map(g => (
+                  <div key={g.id} className="gl-row">
+                    <span className="gl-name">
+                      {g.name}
+                      {g.relation ? <span className="gl-relation"> · {g.relation}</span> : null}
+                    </span>
+                    <span className={`gl-badge ${g.rsvp_status === "coming" ? "gb-y" : g.rsvp_status === "not_coming" ? "gb-n" : "gb-p"}`}>
+                      {g.rsvp_status === "coming" ? "💃 Coming" : g.rsvp_status === "not_coming" ? "🥺 Can't make it" : "⏳ Pending"}
+                    </span>
+                    {g.rsvp_status === "pending"
+                      ? <button className="rsvp-btn" onClick={() => openModal(g)}>RSVP →</button>
+                      : <button className="rsvp-btn-done" onClick={() => openModal(g)}>Update</button>
+                    }
+                  </div>
+                ))}
             </div>
             <p style={{ marginTop: 24, fontSize: 13, color: "#9A98A4", textAlign: "center" }}>
               Don't see your name? Ask Bentley or Robyn to add you to the list.
