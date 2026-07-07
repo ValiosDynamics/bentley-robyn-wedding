@@ -181,6 +181,19 @@ const CSS = `
   .p1-deny{background:none;border:1px solid rgba(220,38,38,.3);color:#dc2626;border-radius:8px;padding:7px 14px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer;}
   .adm-empty{color:#9A98A4;font-size:13px;padding:8px 0;}
 
+  .drop{border:2px dashed rgba(255,107,53,.4);border-radius:18px;padding:44px 24px;text-align:center;cursor:pointer;background:rgba(255,107,53,.04);transition:all .2s;}
+  .drop:hover{background:rgba(255,107,53,.08);border-color:#FF6B35;}
+  .drop-icon{font-size:36px;margin-bottom:12px;}
+  .drop-t{font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;color:#1C1A22;margin-bottom:4px;}
+  .drop-s{font-size:13px;color:#9A98A4;}
+  .up-status{margin-top:16px;font-size:13px;color:#6B6975;text-align:center;}
+  .up-status.ok{color:#16a34a;font-weight:600;}
+  .up-status.err{color:#dc2626;font-weight:600;}
+  .pg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-top:32px;}
+  .pg-item{aspect-ratio:1;border-radius:12px;overflow:hidden;background:#F0ECE2;position:relative;box-shadow:0 2px 8px rgba(28,26,34,.06);}
+  .pg-item img,.pg-item video{width:100%;height:100%;object-fit:cover;display:block;}
+  .pg-empty{text-align:center;color:#9A98A4;font-size:14px;padding:20px 0;}
+
   @media(max-width:640px){
     .wnav{padding:13px 18px;} .wnav-links{gap:16px;} .wnl{font-size:10.5px;}
     .cd-box{min-width:58px;padding:13px 8px;} .wsec{padding:80px 18px;}
@@ -216,8 +229,41 @@ export default function App() {
   const [p1Name, setP1Name] = useState("");
   const [mLoading, setMLoading] = useState(false);
 
+  const [photos, setPhotos] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState(null); // {type:'ok'|'err', text}
+
+  async function loadPhotos() {
+    const { data, error } = await supabase.storage.from("wedding-photos").list("", { sortBy: { column: "created_at", order: "desc" } });
+    if (error || !data) return;
+    const withUrls = data
+      .filter(f => f.name !== ".emptyFolderPlaceholder")
+      .map(f => ({ name: f.name, url: supabase.storage.from("wedding-photos").getPublicUrl(f.name).data.publicUrl }));
+    setPhotos(withUrls);
+  }
+
+  async function handlePhotoUpload(fileList) {
+    const files = Array.from(fileList);
+    if (files.length === 0) return;
+    setUploading(true);
+    setUploadMsg(null);
+    let okCount = 0;
+    for (const file of files) {
+      const ext = file.name.split(".").pop();
+      const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error } = await supabase.storage.from("wedding-photos").upload(path, file);
+      if (!error) okCount++;
+    }
+    setUploading(false);
+    if (okCount === files.length) setUploadMsg({ type: "ok", text: `${okCount} photo${okCount > 1 ? "s" : ""} uploaded — thank you! 💛` });
+    else if (okCount > 0) setUploadMsg({ type: "err", text: `${okCount} of ${files.length} uploaded — a few failed, try again?` });
+    else setUploadMsg({ type: "err", text: "Upload failed — try again, or check your connection." });
+    loadPhotos();
+  }
+
   useEffect(() => {
     loadAll();
+    loadPhotos();
     const t = setInterval(() => setTl(tLeft(cfg.event_date_iso)), 1000);
     return () => clearInterval(t);
   }, []);
@@ -537,6 +583,7 @@ export default function App() {
         <div className="wnav-links">
           <button className="wnl" onClick={() => go("vibe")}>The Vibe</button>
           <button className="wnl" onClick={() => go("details")}>Details</button>
+          <button className="wnl" onClick={() => go("share-photos")}>Photos</button>
           {guests.length > 0 && <button className="wnl" onClick={() => go("guestlist")}>Guest List</button>}
         </div>
       </nav>
@@ -601,6 +648,34 @@ export default function App() {
               Whatever you want to dance in. Nice casual is the vibe — leave the heels at home if you actually plan to move.
             </p>
           </div>
+        </div>
+      </section>
+
+      <section id="share-photos" className="wsec">
+        <div className="wi">
+          <p className="ey">from your eyes</p>
+          <h2 className="st">Got a photo?<br /><span className="acc">Drop it here.</span></h2>
+          <label className="drop">
+            <input type="file" accept="image/*,video/*" multiple style={{ display: "none" }}
+              onChange={e => handlePhotoUpload(e.target.files)} disabled={uploading} />
+            <div className="drop-icon">📸</div>
+            <div className="drop-t">{uploading ? "Uploading..." : "Tap to choose photos or videos"}</div>
+            <div className="drop-s">No account needed — straight from your camera roll</div>
+          </label>
+          {uploadMsg && <p className={`up-status ${uploadMsg.type}`}>{uploadMsg.text}</p>}
+          {photos.length > 0 ? (
+            <div className="pg-grid">
+              {photos.map(p => (
+                <div key={p.name} className="pg-item">
+                  {p.name.match(/\.(mp4|mov|webm)$/i)
+                    ? <video src={p.url} muted />
+                    : <img src={p.url} alt="" loading="lazy" />}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="pg-empty">No photos yet — be the first!</p>
+          )}
         </div>
       </section>
 
