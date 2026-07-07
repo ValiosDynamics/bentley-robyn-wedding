@@ -1,435 +1,519 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 
-// ── Admin password ─────────────────────────────────────────────────────────
-// Change this to whatever you want. Guests can't see source code when deployed.
-const ADMIN_PASSWORD = "bestfriends4eva";
+// ─── Supabase config ──────────────────────────────────────────────────────────
+const SUPA_URL  = "https://alotheclcqttowcyacya.supabase.co";
+const SUPA_KEY  = "sb_publishable_KPSRK3XgMrFVr2CxSR2LMw_ERf5wYxl";
+const ADMIN_PW  = "bestfriends4eva";
 
-// ── Default config (overridden once you save from the admin panel) ─────────
-const DEFAULT_CONFIG = {
-  dateDisplay: "June 2027",
-  dateISO:     "2027-06-19T17:00:00-07:00",
-  venueName:   "Kelowna, BC",
-  venueSub:    "Venue TBD — stay tuned",
-  doorsTime:   "5:00 PM",
-  photoLink:   "",
-};
+// ─── Supabase REST helpers ────────────────────────────────────────────────────
+const H  = { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}`, "Content-Type": "application/json", "Prefer": "return=representation" };
+const HU = { ...H, "Prefer": "resolution=merge-duplicates,return=representation" };
 
-const EQ_BARS = Array.from({ length: 32 }, (_, i) => ({
-  anim:  `eq${(i % 5) + 1}`,
-  dur:   `${(0.65 + (i * 0.14) % 0.95).toFixed(2)}s`,
-  delay: `${-((i * 0.21) % 1.5).toFixed(2)}s`,
+async function dbGet(table, q = "")    { const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${q}`, { headers: H });  return r.ok ? r.json() : []; }
+async function dbPost(table, d)        { const r = await fetch(`${SUPA_URL}/rest/v1/${table}`,       { method: "POST",   headers: H,  body: JSON.stringify(d) }); return r.ok ? r.json() : null; }
+async function dbPatch(table, q, d)    { const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${q}`,  { method: "PATCH",  headers: H,  body: JSON.stringify(d) }); return r.ok; }
+async function dbDelete(table, q)      {           await fetch(`${SUPA_URL}/rest/v1/${table}?${q}`,  { method: "DELETE", headers: H }); }
+async function dbUpsert(table, q, d)   { const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${q}`,  { method: "POST",   headers: HU, body: JSON.stringify(d) }); return r.ok ? r.json() : null; }
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+function pad(n)  { return String(n).padStart(2, "0"); }
+function tLeft(iso) {
+  const d = new Date(iso) - Date.now();
+  if (d <= 0) return { days: 0, hours: 0, minutes: 0, seconds: 0 };
+  return { days: Math.floor(d/86400000), hours: Math.floor(d%86400000/3600000), minutes: Math.floor(d%3600000/60000), seconds: Math.floor(d%60000/1000) };
+}
+
+const EQ = Array.from({ length: 32 }, (_, i) => ({
+  a: `eq${(i%5)+1}`, d: `${(0.65+(i*0.14)%0.95).toFixed(2)}s`, dl: `${-((i*0.21)%1.5).toFixed(2)}s`
 }));
 
-function getTimeLeft(isoDate) {
-  const diff = new Date(isoDate) - Date.now();
-  if (diff <= 0) return { days: 0, hours: 0, minutes: 0, seconds: 0 };
-  return {
-    days:    Math.floor(diff / 86400000),
-    hours:   Math.floor((diff % 86400000) / 3600000),
-    minutes: Math.floor((diff % 3600000) / 60000),
-    seconds: Math.floor((diff % 60000) / 1000),
-  };
-}
+const DEF_CFG = { date_display:"June 2027", date_iso:"2027-06-19T17:00:00-07:00", venue_name:"Kelowna, BC", venue_sub:"Venue TBD — stay tuned", doors_time:"5:00 PM", photo_link:"", guest_password:"dancefloor2027" };
 
-function buildPublicList(guests, rsvps) {
-  const list = guests.map(g => {
-    const match = rsvps.find(r =>
-      r.name.trim().toLowerCase() === g.name.trim().toLowerCase()
-    );
-    return {
-      id:     g.id,
-      name:   g.name,
-      status: match ? match.attending : "pending",
-      guests: match?.guests || "1",
-    };
-  });
-  rsvps.forEach(r => {
-    const already = list.some(g =>
-      g.name.trim().toLowerCase() === r.name.trim().toLowerCase()
-    );
-    if (!already) {
-      list.push({ id: `rsvp-${r.name}`, name: r.name, status: r.attending, guests: r.guests });
-    }
-  });
-  const order = { yes: 0, pending: 1, no: 2 };
-  return list.sort((a, b) => (order[a.status] ?? 1) - (order[b.status] ?? 1));
-}
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;0,9..144,900;1,9..144,300&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  html{scroll-behavior:smooth;}
+  body{font-family:'Plus Jakarta Sans',sans-serif;background:#FDFCFA;color:#1C1A22;overflow-x:hidden;}
+  ::-webkit-scrollbar{width:5px;} ::-webkit-scrollbar-track{background:#FDFCFA;} ::-webkit-scrollbar-thumb{background:#FF6B35;border-radius:3px;}
 
-const STYLES = `
-  @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;0,9..144,900;1,9..144,300;1,9..144,700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  html { scroll-behavior: smooth; }
-  body { font-family: 'Plus Jakarta Sans', sans-serif; background: #FDFCFA; color: #1C1A22; overflow-x: hidden; }
-  ::-webkit-scrollbar { width: 5px; }
-  ::-webkit-scrollbar-track { background: #FDFCFA; }
-  ::-webkit-scrollbar-thumb { background: #FF6B35; border-radius: 3px; }
-
-  @keyframes eq1 { 0%,100%{transform:scaleY(0.12)} 50%{transform:scaleY(0.9)} }
-  @keyframes eq2 { 0%,100%{transform:scaleY(0.7)} 50%{transform:scaleY(0.2)} }
-  @keyframes eq3 { 0%,100%{transform:scaleY(0.3)} 50%{transform:scaleY(1.0)} }
-  @keyframes eq4 { 0%,100%{transform:scaleY(0.8)} 50%{transform:scaleY(0.18)} }
-  @keyframes eq5 { 0%,100%{transform:scaleY(0.22)} 50%{transform:scaleY(0.75)} }
-  @keyframes fadeUp { from{opacity:0;transform:translateY(22px)} to{opacity:1;transform:translateY(0)} }
-  @keyframes bob   { 0%,100%{opacity:0.2} 50%{opacity:0.8} }
-  .wu  { animation: fadeUp 0.75s ease both; }
-  .wu1 { animation-delay: 0.05s; }
-  .wu2 { animation-delay: 0.15s; }
-  .wu3 { animation-delay: 0.25s; }
-  .wu4 { animation-delay: 0.38s; }
+  @keyframes eq1{0%,100%{transform:scaleY(0.12)}50%{transform:scaleY(0.9)}}
+  @keyframes eq2{0%,100%{transform:scaleY(0.7)}50%{transform:scaleY(0.2)}}
+  @keyframes eq3{0%,100%{transform:scaleY(0.3)}50%{transform:scaleY(1.0)}}
+  @keyframes eq4{0%,100%{transform:scaleY(0.8)}50%{transform:scaleY(0.18)}}
+  @keyframes eq5{0%,100%{transform:scaleY(0.22)}50%{transform:scaleY(0.75)}}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes bob{0%,100%{opacity:0.2}50%{opacity:0.8}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .wu{animation:fadeUp .75s ease both;} .wu1{animation-delay:.05s;} .wu2{animation-delay:.15s;} .wu3{animation-delay:.25s;} .wu4{animation-delay:.38s;}
 
   /* NAV */
-  .wnav { position:fixed; top:0; left:0; right:0; z-index:100; padding:16px 40px; display:flex; justify-content:space-between; align-items:center; background:rgba(253,252,250,0.92); backdrop-filter:blur(16px); border-bottom:1px solid rgba(28,26,34,0.08); }
-  .wnav-logo { font-family:'Fraunces',serif; font-size:22px; font-weight:700; font-style:italic; color:#FF6B35; cursor:pointer; }
-  .wnav-links { display:flex; gap:28px; }
-  .wnav-link { color:#9A98A4; font-size:12px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; cursor:pointer; background:none; border:none; padding:0; font-family:'Plus Jakarta Sans',sans-serif; transition:color 0.2s; }
-  .wnav-link:hover { color:#FF6B35; }
+  .wnav{position:fixed;top:0;left:0;right:0;z-index:100;padding:16px 40px;display:flex;justify-content:space-between;align-items:center;background:rgba(253,252,250,.92);backdrop-filter:blur(16px);border-bottom:1px solid rgba(28,26,34,.08);}
+  .wnav-logo{font-family:'Fraunces',serif;font-size:22px;font-weight:700;font-style:italic;color:#FF6B35;cursor:pointer;}
+  .wnav-links{display:flex;gap:28px;}
+  .wnl{color:#9A98A4;font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;background:none;border:none;padding:0;font-family:'Plus Jakarta Sans',sans-serif;transition:color .2s;}
+  .wnl:hover{color:#FF6B35;}
 
   /* HERO */
-  .hero { position:relative; min-height:100vh; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; padding:100px 24px 80px; overflow:hidden; background:#FFF8F0; }
-  .hero-eq { position:absolute; bottom:0; left:0; right:0; height:50%; display:flex; align-items:flex-end; opacity:0.1; pointer-events:none; }
-  .eq-b { flex:1; margin:0 1.5px; border-radius:3px 3px 0 0; transform-origin:bottom; background:#FF6B35; }
-  .hero-eyebrow { font-family:'Fraunces',serif; font-size:21px; font-weight:300; font-style:italic; color:#FF6B35; margin-bottom:20px; position:relative; z-index:1; }
-  .hero-title { font-family:'Fraunces',serif; font-size:clamp(64px,14vw,138px); font-weight:900; line-height:0.87; letter-spacing:-0.03em; color:#1C1A22; position:relative; z-index:1; }
-  .amp { color:#FF6B35; font-style:italic; font-weight:300; }
-  .hero-sub { margin-top:28px; font-size:13px; color:#9A98A4; letter-spacing:0.22em; text-transform:uppercase; font-weight:600; position:relative; z-index:1; }
-  .cd-row { display:flex; gap:14px; margin-top:52px; position:relative; z-index:1; }
-  .cd-box { background:white; border:1px solid rgba(28,26,34,0.1); border-radius:14px; padding:20px 24px; min-width:84px; text-align:center; box-shadow:0 2px 10px rgba(28,26,34,0.07); }
-  .cd-num { font-family:'Fraunces',serif; font-size:clamp(28px,5vw,48px); font-weight:700; color:#FF6B35; line-height:1; font-variant-numeric:tabular-nums; }
-  .cd-lbl { font-size:10px; color:#9A98A4; letter-spacing:0.14em; text-transform:uppercase; margin-top:9px; font-weight:600; }
-  .cta { margin-top:44px; background:#FF6B35; color:white; border:none; border-radius:12px; padding:17px 46px; font-family:'Plus Jakarta Sans',sans-serif; font-size:15px; font-weight:700; cursor:pointer; letter-spacing:0.04em; transition:background 0.2s,transform 0.15s; position:relative; z-index:1; box-shadow:0 4px 18px rgba(255,107,53,0.32); }
-  .cta:hover { background:#e55924; transform:translateY(-2px); }
-  .cta:active { transform:translateY(0); }
-  .scroll-hint { position:absolute; bottom:30px; left:50%; transform:translateX(-50%); font-size:20px; color:rgba(28,26,34,0.18); animation:bob 2.5s ease infinite; }
+  .hero{position:relative;min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:100px 24px 80px;overflow:hidden;background:#FFF8F0;}
+  .hero-eq{position:absolute;bottom:0;left:0;right:0;height:50%;display:flex;align-items:flex-end;opacity:.1;pointer-events:none;}
+  .eq-b{flex:1;margin:0 1.5px;border-radius:3px 3px 0 0;transform-origin:bottom;background:#FF6B35;}
+  .hero-ey{font-family:'Fraunces',serif;font-size:21px;font-weight:300;font-style:italic;color:#FF6B35;margin-bottom:20px;position:relative;z-index:1;}
+  .hero-t{font-family:'Fraunces',serif;font-size:clamp(64px,14vw,138px);font-weight:900;line-height:.87;letter-spacing:-.03em;color:#1C1A22;position:relative;z-index:1;}
+  .amp{color:#FF6B35;font-style:italic;font-weight:300;}
+  .hero-s{margin-top:28px;font-size:13px;color:#9A98A4;letter-spacing:.22em;text-transform:uppercase;font-weight:600;position:relative;z-index:1;}
+  .cd-row{display:flex;gap:14px;margin-top:52px;position:relative;z-index:1;}
+  .cd-box{background:white;border:1px solid rgba(28,26,34,.1);border-radius:14px;padding:20px 24px;min-width:84px;text-align:center;box-shadow:0 2px 10px rgba(28,26,34,.07);}
+  .cd-n{font-family:'Fraunces',serif;font-size:clamp(28px,5vw,48px);font-weight:700;color:#FF6B35;line-height:1;font-variant-numeric:tabular-nums;}
+  .cd-l{font-size:10px;color:#9A98A4;letter-spacing:.14em;text-transform:uppercase;margin-top:9px;font-weight:600;}
+  .cta{margin-top:44px;background:#FF6B35;color:white;border:none;border-radius:12px;padding:17px 46px;font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;letter-spacing:.04em;transition:background .2s,transform .15s;position:relative;z-index:1;box-shadow:0 4px 18px rgba(255,107,53,.32);}
+  .cta:hover{background:#e55924;transform:translateY(-2px);}
+  .sh{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);font-size:20px;color:rgba(28,26,34,.18);animation:bob 2.5s ease infinite;}
 
   /* SECTIONS */
-  .wsec     { padding:110px 24px; background:#FDFCFA; }
-  .wsec-alt { background:#F7F4EF; border-top:1px solid rgba(28,26,34,0.06); border-bottom:1px solid rgba(28,26,34,0.06); }
-  .wsec-inner { max-width:1060px; margin:0 auto; }
-  .eyebrow { font-family:'Fraunces',serif; font-size:20px; font-weight:300; font-style:italic; color:#FF6B35; margin-bottom:12px; }
-  .sec-title { font-family:'Fraunces',serif; font-size:clamp(30px,5vw,50px); font-weight:700; line-height:1.1; margin-bottom:54px; color:#1C1A22; }
-  .acc { color:#FF6B35; }
+  .wsec{padding:110px 24px;background:#FDFCFA;}
+  .wsec-alt{background:#F7F4EF;border-top:1px solid rgba(28,26,34,.06);border-bottom:1px solid rgba(28,26,34,.06);}
+  .wi{max-width:1060px;margin:0 auto;}
+  .ey{font-family:'Fraunces',serif;font-size:20px;font-weight:300;font-style:italic;color:#FF6B35;margin-bottom:12px;}
+  .st{font-family:'Fraunces',serif;font-size:clamp(30px,5vw,50px);font-weight:700;line-height:1.1;margin-bottom:54px;}
+  .acc{color:#FF6B35;}
 
   /* VIBE */
-  .vibe-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:16px; }
-  .vibe-card { background:white; border:1px solid rgba(28,26,34,0.08); border-radius:18px; padding:36px 22px; text-align:center; transition:border-color 0.2s,transform 0.2s,box-shadow 0.2s; box-shadow:0 2px 8px rgba(28,26,34,0.04); }
-  .vibe-card:hover { border-color:rgba(255,107,53,0.35); transform:translateY(-5px); box-shadow:0 10px 28px rgba(255,107,53,0.12); }
-  .vibe-icon  { font-size:42px; margin-bottom:16px; display:block; }
-  .vibe-title { font-family:'Fraunces',serif; font-size:19px; font-weight:700; margin-bottom:10px; }
-  .vibe-body  { font-size:13.5px; color:#6B6975; line-height:1.65; }
+  .vibe-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;}
+  .vc{background:white;border:1px solid rgba(28,26,34,.08);border-radius:18px;padding:36px 22px;text-align:center;transition:border-color .2s,transform .2s,box-shadow .2s;box-shadow:0 2px 8px rgba(28,26,34,.04);}
+  .vc:hover{border-color:rgba(255,107,53,.35);transform:translateY(-5px);box-shadow:0 10px 28px rgba(255,107,53,.12);}
+  .vi{font-size:42px;margin-bottom:16px;display:block;}
+  .vt{font-family:'Fraunces',serif;font-size:19px;font-weight:700;margin-bottom:10px;}
+  .vb{font-size:13.5px;color:#6B6975;line-height:1.65;}
 
   /* DETAILS */
-  .detail-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:18px; margin-bottom:18px; }
-  .d-card { background:white; border:1px solid rgba(28,26,34,0.08); border-radius:16px; padding:26px 22px; box-shadow:0 2px 8px rgba(28,26,34,0.04); }
-  .d-lbl { font-size:11px; color:#9A98A4; font-weight:600; letter-spacing:0.09em; text-transform:uppercase; margin-bottom:12px; }
-  .d-val { font-family:'Fraunces',serif; font-size:26px; font-weight:700; margin-bottom:5px; }
-  .d-sub { font-size:13px; color:#6B6975; }
-  .d-note { background:rgba(255,107,53,0.06); border:1px solid rgba(255,107,53,0.18); border-radius:14px; padding:20px 22px; }
+  .dg{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:18px;margin-bottom:18px;}
+  .dc{background:white;border:1px solid rgba(28,26,34,.08);border-radius:16px;padding:26px 22px;box-shadow:0 2px 8px rgba(28,26,34,.04);}
+  .dl{font-size:11px;color:#9A98A4;font-weight:600;letter-spacing:.09em;text-transform:uppercase;margin-bottom:12px;}
+  .dv{font-family:'Fraunces',serif;font-size:26px;font-weight:700;margin-bottom:5px;}
+  .ds{font-size:13px;color:#6B6975;}
+  .dn{background:rgba(255,107,53,.06);border:1px solid rgba(255,107,53,.18);border-radius:14px;padding:20px 22px;}
 
-  /* PHOTO LINK */
-  .photo-btn { display:inline-flex; align-items:center; gap:10px; background:#1C1A22; color:white; text-decoration:none; border-radius:12px; padding:18px 32px; font-family:'Plus Jakarta Sans',sans-serif; font-size:15px; font-weight:700; transition:background 0.2s,transform 0.15s; }
-  .photo-btn:hover { background:#3C3A42; transform:translateY(-2px); }
+  /* PHOTO */
+  .photo-btn{display:inline-flex;align-items:center;gap:10px;background:#1C1A22;color:white;text-decoration:none;border-radius:12px;padding:18px 32px;font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;transition:background .2s,transform .15s;}
+  .photo-btn:hover{background:#3C3A42;transform:translateY(-2px);}
 
   /* GUEST LIST */
-  .gl-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; }
-  .gl-item { background:white; border:1px solid rgba(28,26,34,0.08); border-radius:10px; padding:12px 16px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 1px 4px rgba(28,26,34,0.04); }
-  .gl-name { font-size:14px; font-weight:600; color:#1C1A22; }
-  .gl-badge { font-size:11px; font-weight:700; padding:3px 10px; border-radius:20px; white-space:nowrap; margin-left:8px; flex-shrink:0; }
-  .gb-yes     { background:rgba(34,197,94,0.1); color:#16a34a; }
-  .gb-no      { background:rgba(239,68,68,0.1); color:#dc2626; }
-  .gb-pending { background:rgba(234,179,8,0.1); color:#ca8a04; }
+  .gl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;}
+  .gl-card{background:white;border:1px solid rgba(28,26,34,.08);border-radius:12px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 1px 4px rgba(28,26,34,.04);gap:10px;}
+  .gl-name{font-size:14px;font-weight:600;color:#1C1A22;flex:1;}
+  .gl-badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;flex-shrink:0;}
+  .gb-y{background:rgba(34,197,94,.1);color:#16a34a;}
+  .gb-n{background:rgba(239,68,68,.1);color:#dc2626;}
+  .gb-p{background:rgba(234,179,8,.1);color:#ca8a04;}
+  .rsvp-btn{background:none;border:1px solid rgba(28,26,34,.15);border-radius:8px;padding:7px 14px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;transition:all .2s;color:#1C1A22;}
+  .rsvp-btn:hover{background:#FF6B35;border-color:#FF6B35;color:white;}
+  .rsvp-btn-done{background:none;border:none;padding:7px 0;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer;color:#9A98A4;flex-shrink:0;}
+  .rsvp-btn-done:hover{color:#FF6B35;}
 
-  /* RSVP */
-  .rsvp-wrap { max-width:570px; margin:0 auto; }
-  .fg { margin-bottom:18px; }
-  .flbl { display:block; font-size:11px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#9A98A4; margin-bottom:8px; }
-  .fi,.fs,.fta { width:100%; background:white; border:1px solid rgba(28,26,34,0.12); border-radius:11px; padding:14px 16px; color:#1C1A22; font-family:'Plus Jakarta Sans',sans-serif; font-size:15px; outline:none; transition:border-color 0.2s; box-shadow:0 1px 4px rgba(28,26,34,0.05); }
-  .fi:focus,.fs:focus,.fta:focus { border-color:#FF6B35; }
-  .fi::placeholder,.fta::placeholder { color:#C4C2CC; }
-  .fs option { background:white; color:#1C1A22; }
-  .sub-btn { width:100%; background:#FF6B35; color:white; border:none; border-radius:11px; padding:17px; font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:700; cursor:pointer; letter-spacing:0.04em; transition:background 0.2s,transform 0.15s; margin-top:6px; box-shadow:0 4px 16px rgba(255,107,53,0.28); }
-  .sub-btn:hover { background:#e55924; transform:translateY(-2px); }
-  .sub-btn:disabled { opacity:0.6; cursor:not-allowed; transform:none; }
-  .ok-box { background:rgba(255,107,53,0.06); border:1px solid rgba(255,107,53,0.22); border-radius:18px; padding:52px 32px; text-align:center; }
-  .ok-icon  { font-size:50px; margin-bottom:16px; }
-  .ok-title { font-family:'Fraunces',serif; font-size:30px; font-weight:700; margin-bottom:10px; }
-  .ok-sub   { font-size:15px; color:#6B6975; }
-  .ghost { background:transparent; border:1px solid rgba(28,26,34,0.15); border-radius:9px; padding:11px 26px; color:#6B6975; cursor:pointer; font-family:'Plus Jakarta Sans',sans-serif; font-size:13px; margin-top:22px; transition:border-color 0.2s,color 0.2s; }
-  .ghost:hover { border-color:rgba(28,26,34,0.35); color:#1C1A22; }
+  /* MODAL */
+  .mo{position:fixed;inset:0;z-index:1000;background:rgba(28,26,34,.55);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:20px;}
+  .mb{background:white;border-radius:20px;padding:40px 36px;max-width:480px;width:100%;position:relative;box-shadow:0 20px 60px rgba(28,26,34,.25);max-height:90vh;overflow-y:auto;}
+  .mc{position:absolute;top:14px;right:14px;background:none;border:none;font-size:22px;cursor:pointer;color:#9A98A4;padding:4px 8px;border-radius:6px;line-height:1;transition:background .2s;}
+  .mc:hover{background:#F7F4EF;}
+  .mt{font-family:'Fraunces',serif;font-size:24px;font-weight:700;margin-bottom:6px;}
+  .ms{font-size:14px;color:#6B6975;margin-bottom:28px;line-height:1.5;}
+  .mdone{text-align:center;padding:10px 0;}
+  .mdone-i{font-size:48px;margin-bottom:16px;}
+  .mdone-t{font-family:'Fraunces',serif;font-size:26px;font-weight:700;margin-bottom:8px;}
+  .mdone-s{font-size:15px;color:#6B6975;}
+
+  /* FORMS */
+  .fg{margin-bottom:18px;}
+  .fl{display:block;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#9A98A4;margin-bottom:8px;}
+  .fi,.fs,.fta{width:100%;background:white;border:1px solid rgba(28,26,34,.12);border-radius:11px;padding:14px 16px;color:#1C1A22;font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;outline:none;transition:border-color .2s;box-shadow:0 1px 4px rgba(28,26,34,.05);}
+  .fi:focus,.fs:focus,.fta:focus{border-color:#FF6B35;}
+  .fi::placeholder,.fta::placeholder{color:#C4C2CC;}
+  .fs option{background:white;color:#1C1A22;}
+
+  /* ATTENDING TOGGLE */
+  .att-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px;}
+  .att-btn{border:1px solid rgba(28,26,34,.15);border-radius:10px;padding:14px;text-align:center;cursor:pointer;background:white;font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:600;transition:all .2s;}
+  .att-y.active{background:rgba(34,197,94,.08);border-color:rgba(34,197,94,.5);color:#16a34a;}
+  .att-n.active{background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.5);color:#dc2626;}
+
+  /* PLUS ONE */
+  .p1-section{margin-top:20px;padding-top:20px;border-top:1px solid rgba(28,26,34,.06);}
+  .p1-toggle{background:none;border:1px dashed rgba(28,26,34,.2);border-radius:10px;padding:12px 20px;font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:600;color:#6B6975;cursor:pointer;width:100%;text-align:center;transition:all .2s;margin-bottom:12px;}
+  .p1-toggle:hover{border-color:#FF6B35;color:#FF6B35;}
+  .p1-toggle.active{border-style:solid;border-color:#FF6B35;color:#FF6B35;background:rgba(255,107,53,.04);}
+
+  /* BUTTONS */
+  .btn-primary{width:100%;background:#FF6B35;color:white;border:none;border-radius:11px;padding:17px;font-family:'Plus Jakarta Sans',sans-serif;font-size:16px;font-weight:700;cursor:pointer;letter-spacing:.04em;transition:background .2s,transform .15s;margin-top:8px;box-shadow:0 4px 16px rgba(255,107,53,.28);}
+  .btn-primary:hover{background:#e55924;transform:translateY(-2px);}
+  .btn-primary:disabled{opacity:.6;cursor:not-allowed;transform:none;}
+  .btn-ghost{background:transparent;border:1px solid rgba(28,26,34,.15);border-radius:9px;padding:11px 26px;color:#6B6975;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;margin-top:16px;transition:all .2s;}
+  .btn-ghost:hover{border-color:rgba(28,26,34,.35);color:#1C1A22;}
 
   /* FOOTER */
-  .wfooter { border-top:1px solid rgba(28,26,34,0.08); padding:48px 24px; text-align:center; background:#FDFCFA; }
-  .wf-logo { font-family:'Fraunces',serif; font-size:30px; font-weight:700; font-style:italic; color:#FF6B35; margin-bottom:8px; }
-  .wf-sub  { font-size:11px; color:#C4C2CC; letter-spacing:0.16em; text-transform:uppercase; }
-  .admin-btn { background:none; border:none; font-size:11px; color:#D8D6E0; cursor:pointer; margin-top:24px; font-family:'Plus Jakarta Sans',sans-serif; letter-spacing:0.08em; text-transform:uppercase; transition:color 0.2s; }
-  .admin-btn:hover { color:#9A98A4; }
+  .wfooter{border-top:1px solid rgba(28,26,34,.08);padding:48px 24px;text-align:center;background:#FDFCFA;}
+  .wf-logo{font-family:'Fraunces',serif;font-size:30px;font-weight:700;font-style:italic;color:#FF6B35;margin-bottom:8px;}
+  .wf-sub{font-size:11px;color:#C4C2CC;letter-spacing:.16em;text-transform:uppercase;}
+  .adm-link{background:none;border:none;font-size:11px;color:#E0DEE8;cursor:pointer;margin-top:24px;font-family:'Plus Jakarta Sans',sans-serif;letter-spacing:.08em;text-transform:uppercase;transition:color .2s;}
+  .adm-link:hover{color:#9A98A4;}
 
-  /* ADMIN — password gate */
-  .pw-gate { min-height:100vh; display:flex; flex-direction:column; justify-content:center; align-items:center; background:#F7F4EF; padding:24px; text-align:center; }
-  .pw-eyebrow { font-size:11px; color:#9A98A4; letter-spacing:0.12em; text-transform:uppercase; margin-bottom:10px; }
-  .pw-title { font-family:'Fraunces',serif; font-size:40px; font-weight:700; font-style:italic; color:#FF6B35; margin-bottom:8px; }
-  .pw-sub   { color:#6B6975; margin-bottom:32px; font-size:15px; }
-  .pw-row   { display:flex; gap:10px; width:100%; max-width:380px; }
-  .pw-input { flex:1; background:white; border:1px solid rgba(28,26,34,0.12); border-radius:10px; padding:14px 16px; font-family:'Plus Jakarta Sans',sans-serif; font-size:15px; outline:none; color:#1C1A22; transition:border-color 0.2s; box-shadow:0 1px 4px rgba(28,26,34,0.05); }
-  .pw-input:focus { border-color:#FF6B35; }
-  .pw-btn { background:#FF6B35; color:white; border:none; border-radius:10px; padding:14px 22px; font-family:'Plus Jakarta Sans',sans-serif; font-size:15px; font-weight:700; cursor:pointer; white-space:nowrap; box-shadow:0 3px 12px rgba(255,107,53,0.3); }
-  .pw-error { color:#dc2626; font-size:13px; margin-top:12px; }
-  .pw-back  { margin-top:28px; background:none; border:none; color:#9A98A4; cursor:pointer; font-size:13px; font-family:'Plus Jakarta Sans',sans-serif; }
+  /* LOADING */
+  .load-screen{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#FDFCFA;gap:20px;}
+  .load-logo{font-family:'Fraunces',serif;font-size:48px;font-weight:700;font-style:italic;color:#FF6B35;}
+  .load-spin{width:24px;height:24px;border:2px solid rgba(255,107,53,.2);border-top-color:#FF6B35;border-radius:50%;animation:spin .8s linear infinite;}
 
-  /* ADMIN — panel */
-  .adm-bar { background:white; border-bottom:1px solid rgba(28,26,34,0.08); padding:16px 32px; display:flex; justify-content:space-between; align-items:center; position:sticky; top:0; z-index:10; }
-  .adm-bar-title { font-family:'Fraunces',serif; font-size:20px; font-weight:700; }
-  .adm-bar-actions { display:flex; gap:10px; }
-  .adm-back { background:none; border:1px solid rgba(28,26,34,0.15); border-radius:8px; padding:8px 16px; cursor:pointer; font-family:'Plus Jakarta Sans',sans-serif; font-size:13px; font-weight:600; color:#6B6975; transition:all 0.2s; }
-  .adm-back:hover { border-color:#FF6B35; color:#FF6B35; }
-  .adm-logout { background:none; border:1px solid rgba(220,38,38,0.25); border-radius:8px; padding:8px 16px; cursor:pointer; font-family:'Plus Jakarta Sans',sans-serif; font-size:13px; font-weight:600; color:#dc2626; }
-  .adm-body  { background:#F7F4EF; min-height:100vh; padding:32px 24px 80px; }
-  .adm-inner { max-width:760px; margin:0 auto; }
-  .adm-card  { background:white; border:1px solid rgba(28,26,34,0.08); border-radius:16px; padding:28px; margin-bottom:20px; box-shadow:0 2px 8px rgba(28,26,34,0.05); }
-  .adm-card h2 { font-family:'Fraunces',serif; font-size:19px; font-weight:700; margin-bottom:20px; }
-  .adm-grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
-  .adm-save { background:#FF6B35; color:white; border:none; border-radius:10px; padding:14px 32px; font-family:'Plus Jakarta Sans',sans-serif; font-size:15px; font-weight:700; cursor:pointer; margin-top:6px; box-shadow:0 3px 12px rgba(255,107,53,0.28); transition:background 0.2s; }
-  .adm-save:hover { background:#e55924; }
-  .saved-msg { color:#16a34a; font-size:13px; margin-top:10px; font-weight:600; }
+  /* ADMIN PW GATE */
+  .pw-gate{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;background:#F7F4EF;padding:24px;text-align:center;}
+  .pw-ey{font-size:11px;color:#9A98A4;letter-spacing:.12em;text-transform:uppercase;margin-bottom:10px;}
+  .pw-t{font-family:'Fraunces',serif;font-size:40px;font-weight:700;font-style:italic;color:#FF6B35;margin-bottom:6px;}
+  .pw-s{color:#6B6975;margin-bottom:32px;font-size:15px;}
+  .pw-row{display:flex;gap:10px;width:100%;max-width:380px;}
+  .pw-i{flex:1;background:white;border:1px solid rgba(28,26,34,.12);border-radius:10px;padding:14px 16px;font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;outline:none;color:#1C1A22;transition:border-color .2s;box-shadow:0 1px 4px rgba(28,26,34,.05);}
+  .pw-i:focus{border-color:#FF6B35;}
+  .pw-btn{background:#FF6B35;color:white;border:none;border-radius:10px;padding:14px 22px;font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;white-space:nowrap;box-shadow:0 3px 12px rgba(255,107,53,.3);}
+  .pw-err{color:#dc2626;font-size:13px;margin-top:12px;}
+  .pw-back{margin-top:24px;background:none;border:none;color:#9A98A4;cursor:pointer;font-size:13px;font-family:'Plus Jakarta Sans',sans-serif;}
 
-  /* ADMIN — guest list manager */
-  .add-row { display:flex; gap:10px; margin-bottom:16px; }
-  .add-btn { background:#1C1A22; color:white; border:none; border-radius:10px; padding:0 20px; font-family:'Plus Jakarta Sans',sans-serif; font-size:14px; font-weight:700; cursor:pointer; white-space:nowrap; transition:background 0.2s; }
-  .add-btn:hover { background:#3C3A42; }
-  .gt-empty { color:#9A98A4; font-size:13px; padding:8px 0; }
-  .gt-row { display:flex; align-items:center; padding:10px 0; border-bottom:1px solid rgba(28,26,34,0.06); }
-  .gt-name { flex:1; font-size:14px; font-weight:600; }
-  .gt-badge { font-size:11px; font-weight:700; padding:3px 10px; border-radius:20px; margin-right:10px; }
-  .st-yes     { background:rgba(34,197,94,0.1); color:#16a34a; }
-  .st-no      { background:rgba(239,68,68,0.1); color:#dc2626; }
-  .st-pending { background:rgba(234,179,8,0.1); color:#ca8a04; }
-  .rm-btn { background:none; border:none; color:#dc2626; cursor:pointer; font-size:18px; padding:2px 8px; border-radius:6px; transition:background 0.2s; line-height:1; }
-  .rm-btn:hover { background:rgba(239,68,68,0.1); }
+  /* ADMIN PANEL */
+  .adm-bar{background:white;border-bottom:1px solid rgba(28,26,34,.08);padding:16px 32px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:10;}
+  .adm-bar-t{font-family:'Fraunces',serif;font-size:20px;font-weight:700;}
+  .adm-acts{display:flex;gap:10px;}
+  .adm-back{background:none;border:1px solid rgba(28,26,34,.15);border-radius:8px;padding:8px 16px;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;color:#6B6975;transition:all .2s;}
+  .adm-back:hover{border-color:#FF6B35;color:#FF6B35;}
+  .adm-out{background:none;border:1px solid rgba(220,38,38,.25);border-radius:8px;padding:8px 16px;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;color:#dc2626;}
+  .adm-body{background:#F7F4EF;min-height:100vh;padding:32px 24px 80px;}
+  .adm-inner{max-width:760px;margin:0 auto;}
+  .adm-card{background:white;border:1px solid rgba(28,26,34,.08);border-radius:16px;padding:28px;margin-bottom:20px;box-shadow:0 2px 8px rgba(28,26,34,.05);}
+  .adm-card h2{font-family:'Fraunces',serif;font-size:19px;font-weight:700;margin-bottom:20px;}
+  .adm-g2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .adm-save{background:#FF6B35;color:white;border:none;border-radius:10px;padding:14px 32px;font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;margin-top:6px;box-shadow:0 3px 12px rgba(255,107,53,.28);transition:background .2s;}
+  .adm-save:hover{background:#e55924;}
+  .saved{color:#16a34a;font-size:13px;margin-top:10px;font-weight:600;}
+  .add-row{display:flex;gap:10px;margin-bottom:16px;}
+  .add-btn{background:#1C1A22;color:white;border:none;border-radius:10px;padding:0 20px;font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap;transition:background .2s;}
+  .add-btn:hover{background:#3C3A42;}
+  .gt-row{display:flex;align-items:center;padding:10px 0;border-bottom:1px solid rgba(28,26,34,.06);}
+  .gt-n{flex:1;font-size:14px;font-weight:600;}
+  .gt-b{font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;margin-right:10px;}
+  .st-y{background:rgba(34,197,94,.1);color:#16a34a;}
+  .st-n{background:rgba(239,68,68,.1);color:#dc2626;}
+  .st-p{background:rgba(234,179,8,.1);color:#ca8a04;}
+  .rm-btn{background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px;padding:2px 8px;border-radius:6px;transition:background .2s;line-height:1;}
+  .rm-btn:hover{background:rgba(239,68,68,.1);}
+  .p1-row{background:#F7F4EF;border-radius:12px;padding:14px 18px;margin-bottom:10px;}
+  .p1-row-top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+  .p1-meta{font-size:13px;color:#6B6975;margin-top:4px;}
+  .p1-acts{display:flex;gap:8px;flex-shrink:0;}
+  .p1-approve{background:#16a34a;color:white;border:none;border-radius:8px;padding:7px 14px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer;}
+  .p1-deny{background:none;border:1px solid rgba(220,38,38,.3);color:#dc2626;border-radius:8px;padding:7px 14px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer;}
+  .adm-rsvp{background:#F7F4EF;border-radius:10px;padding:12px 16px;margin-bottom:8px;font-size:13px;}
+  .adm-empty{color:#9A98A4;font-size:13px;padding:8px 0;}
 
-  /* ADMIN — rsvp list */
-  .adm-rsvp { background:#F7F4EF; border-radius:10px; padding:12px 16px; margin-bottom:8px; font-size:13px; }
-
-  @media (max-width:640px) {
-    .wnav { padding:13px 18px; }
-    .wnav-links { gap:16px; }
-    .wnav-link { font-size:10.5px; }
-    .cd-box { min-width:58px; padding:13px 8px; }
-    .wsec { padding:80px 18px; }
-    .adm-grid2 { grid-template-columns:1fr; }
-    .adm-bar { padding:14px 18px; }
-    .pw-row { flex-direction:column; }
+  @media(max-width:640px){
+    .wnav{padding:13px 18px;} .wnav-links{gap:16px;} .wnl{font-size:10.5px;}
+    .cd-box{min-width:58px;padding:13px 8px;} .wsec{padding:80px 18px;}
+    .adm-g2{grid-template-columns:1fr;} .adm-bar{padding:14px 18px;}
+    .pw-row{flex-direction:column;} .mb{padding:28px 22px;}
   }
 `;
 
+// ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const go = id => document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 
-  // ── View & auth ──────────────────────────────────────────────────────────
-  const [view,    setView]    = useState("site");
-  const [authed,  setAuthed]  = useState(false);
-  const [pwInput, setPwInput] = useState("");
-  const [pwError, setPwError] = useState(false);
-
-  // ── Config ───────────────────────────────────────────────────────────────
-  const [config,      setConfig]      = useState(DEFAULT_CONFIG);
-  const [editConfig,  setEditConfig]  = useState(DEFAULT_CONFIG);
-  const [configSaved, setConfigSaved] = useState(false);
-
-  // ── Guests & RSVPs ───────────────────────────────────────────────────────
+  // ── Core state ───────────────────────────────────────────────────────────
+  const [loading,  setLoading]  = useState(true);
+  const [view,     setView]     = useState("site");
+  const [authed,   setAuthed]   = useState(false);
+  const [cfg,      setCfg]      = useState(DEF_CFG);
+  const [editCfg,  setEditCfg]  = useState(DEF_CFG);
   const [guests,   setGuests]   = useState([]);
-  const [newGuest, setNewGuest] = useState("");
   const [rsvps,    setRsvps]    = useState([]);
+  const [plusReqs, setPlusReqs] = useState([]);
+  const [tl,       setTl]       = useState(tLeft(DEF_CFG.date_iso));
 
-  // ── RSVP form ────────────────────────────────────────────────────────────
-  const [form,    setForm]    = useState({ name: "", email: "", attending: "yes", guests: "1", note: "" });
-  const [subDone, setSubDone] = useState(false);
-  const [loading, setLoading] = useState(false);
+  // ── Admin state ──────────────────────────────────────────────────────────
+  const [pwIn,      setPwIn]      = useState("");
+  const [pwErr,     setPwErr]     = useState(false);
+  const [newGuest,  setNewGuest]  = useState("");
+  const [cfgSaved,  setCfgSaved]  = useState(false);
 
-  // ── Countdown ────────────────────────────────────────────────────────────
-  const [tl, setTl] = useState(getTimeLeft(DEFAULT_CONFIG.dateISO));
-
-  // ── Storage helpers ───────────────────────────────────────────────────────
-  const STO_CFG  = "br-config";
-  const STO_GST  = "br-guests";
-  const STO_RSVP = "br-rsvps-2027";
-
-  async function sGet(key) {
-    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; }
-  }
-  async function sSet(key, val) {
-    try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
-  }
+  // ── Modal state ──────────────────────────────────────────────────────────
+  const [modal,      setModal]      = useState(null); // { id, name }
+  const [mStep,      setMStep]      = useState("pw"); // pw | email | form | done
+  const [mPw,        setMPw]        = useState("");
+  const [mPwErr,     setMPwErr]     = useState(false);
+  const [mEmail,     setMEmail]     = useState("");
+  const [mEmailLoad, setMEmailLoad] = useState(false);
+  const [mForm,      setMForm]      = useState({ name:"", email:"", phone:"", attending:"yes", guests_count:"1", note:"" });
+  const [wantP1,     setWantP1]     = useState(false);
+  const [p1Name,     setP1Name]     = useState("");
+  const [mLoading,   setMLoading]   = useState(false);
 
   // ── Init ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (window.location.hash === "#admin") setView("admin");
-    (async () => {
-      const cfg = await sGet(STO_CFG);
-      if (cfg) { setConfig(cfg); setEditConfig(cfg); setTl(getTimeLeft(cfg.dateISO)); }
-      const gst = await sGet(STO_GST);
-      if (gst) setGuests(gst);
-      const rsp = await sGet(STO_RSVP);
-      if (rsp) setRsvps(rsp);
-    })();
-    const t = setInterval(() => setTl(tl => getTimeLeft(config.dateISO)), 1000);
+    loadAll();
+    const t = setInterval(() => setTl(tLeft(cfg.date_iso)), 1000);
     return () => clearInterval(t);
   }, []);
 
-  useEffect(() => { setTl(getTimeLeft(config.dateISO)); }, [config.dateISO]);
+  useEffect(() => setTl(tLeft(cfg.date_iso)), [cfg.date_iso]);
 
-  // ── Admin actions ─────────────────────────────────────────────────────────
-  function handleLogin(e) {
+  async function loadAll() {
+    setLoading(true);
+    try {
+      const [c, g, r, p] = await Promise.all([
+        dbGet("config", "id=eq.1&select=*"),
+        dbGet("guests", "order=name"),
+        dbGet("rsvps",  "order=created_at"),
+        dbGet("plus_one_requests", "status=eq.pending&order=created_at"),
+      ]);
+      if (c?.[0]) { setCfg(c[0]); setEditCfg(c[0]); setTl(tLeft(c[0].date_iso)); }
+      setGuests(g  || []);
+      setRsvps(r   || []);
+      setPlusReqs(p || []);
+    } catch(e) { console.error(e); }
+    setLoading(false);
+  }
+
+  // ── Admin ─────────────────────────────────────────────────────────────────
+  function handleAdminLogin(e) {
     e.preventDefault();
-    if (pwInput === ADMIN_PASSWORD) { setAuthed(true); setPwError(false); }
-    else { setPwError(true); }
+    if (pwIn === ADMIN_PW) { setAuthed(true); setPwErr(false); }
+    else setPwErr(true);
   }
 
   async function saveConfig() {
-    await sSet(STO_CFG, editConfig);
-    setConfig(editConfig);
-    setConfigSaved(true);
-    setTimeout(() => setConfigSaved(false), 2500);
+    const { id, created_at, ...data } = editCfg;
+    await dbPatch("config", "id=eq.1", { ...data, updated_at: new Date().toISOString() });
+    setCfg(editCfg);
+    setCfgSaved(true);
+    setTimeout(() => setCfgSaved(false), 2500);
   }
 
   async function addGuest() {
     const name = newGuest.trim();
     if (!name) return;
-    const updated = [...guests, { id: Date.now().toString(), name }];
-    setGuests(updated);
+    const result = await dbPost("guests", { name });
+    const g = Array.isArray(result) ? result[0] : result;
+    if (g) setGuests(prev => [...prev, g].sort((a,b) => a.name.localeCompare(b.name)));
     setNewGuest("");
-    await sSet(STO_GST, updated);
   }
 
   async function removeGuest(id) {
-    const updated = guests.filter(g => g.id !== id);
-    setGuests(updated);
-    await sSet(STO_GST, updated);
+    await dbDelete("guests", `id=eq.${id}`);
+    setGuests(prev => prev.filter(g => g.id !== id));
+    setRsvps(prev => prev.filter(r => r.guest_id !== id));
   }
 
-  // ── RSVP submit ───────────────────────────────────────────────────────────
-  async function handleRsvp(e) {
+  async function approvePlusOne(req) {
+    const result = await dbPost("guests", { name: req.plus_one_name });
+    const g = Array.isArray(result) ? result[0] : result;
+    if (g) setGuests(prev => [...prev, g].sort((a,b) => a.name.localeCompare(b.name)));
+    await dbPatch("plus_one_requests", `id=eq.${req.id}`, { status: "approved" });
+    setPlusReqs(prev => prev.filter(r => r.id !== req.id));
+  }
+
+  async function denyPlusOne(id) {
+    await dbPatch("plus_one_requests", `id=eq.${id}`, { status: "denied" });
+    setPlusReqs(prev => prev.filter(r => r.id !== id));
+  }
+
+  // ── RSVP modal ────────────────────────────────────────────────────────────
+  function openModal(guest) {
+    setModal(guest);
+    setMStep("pw");
+    setMPw(""); setMPwErr(false);
+    setMEmail(""); setMEmailLoad(false);
+    setMForm({ name: guest.name, email:"", phone:"", attending:"yes", guests_count:"1", note:"" });
+    setWantP1(false); setP1Name("");
+    setMLoading(false);
+  }
+
+  function handleMPw(e) {
     e.preventDefault();
-    setLoading(true);
-    const rsp = await sGet(STO_RSVP);
-    const list = rsp || [];
-    const updated = [...list, { ...form, ts: new Date().toLocaleString("en-CA") }];
-    await sSet(STO_RSVP, updated);
-    setRsvps(updated);
-    setSubDone(true);
-    setLoading(false);
+    if (mPw === cfg.guest_password) { setMPwErr(false); setMStep("email"); }
+    else setMPwErr(true);
   }
 
-  // ── Derived data ──────────────────────────────────────────────────────────
-  const publicList = useMemo(() => buildPublicList(guests, rsvps), [guests, rsvps]);
-  const yesCount   = rsvps.filter(r => r.attending === "yes").length;
-  const noCount    = rsvps.filter(r => r.attending === "no").length;
-  const totalGuests = rsvps.filter(r => r.attending === "yes")
-                           .reduce((s, r) => s + parseInt(r.guests || 1), 0);
+  async function handleMEmail(e) {
+    e.preventDefault();
+    setMEmailLoad(true);
+    try {
+      const existing = await dbGet("rsvps", `email=eq.${encodeURIComponent(mEmail)}&select=*`);
+      if (existing?.[0]) {
+        const r = existing[0];
+        setMForm({ name: r.name, email: r.email, phone: r.phone||"", attending: r.attending, guests_count: String(r.guests_count), note: r.note||"" });
+      } else {
+        setMForm(prev => ({ ...prev, email: mEmail }));
+      }
+    } catch {}
+    setMEmailLoad(false);
+    setMStep("form");
+  }
 
-  // ── Admin nav helpers ─────────────────────────────────────────────────────
+  async function handleRsvpSubmit(e) {
+    e.preventDefault();
+    setMLoading(true);
+    try {
+      await dbUpsert("rsvps", "on_conflict=email", {
+        guest_id: modal.id, name: mForm.name, email: mForm.email,
+        phone: mForm.phone||null, attending: mForm.attending,
+        guests_count: parseInt(mForm.guests_count), note: mForm.note||null,
+        updated_at: new Date().toISOString(),
+      });
+      if (wantP1 && p1Name.trim()) {
+        await dbPost("plus_one_requests", {
+          requester_name: mForm.name, requester_guest_id: modal.id, plus_one_name: p1Name.trim()
+        });
+      }
+      await loadAll();
+      setMStep("done");
+    } catch(e) { console.error(e); }
+    setMLoading(false);
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  const getRsvp   = id => rsvps.find(r => r.guest_id === id);
+  const yesCount  = rsvps.filter(r => r.attending === "yes").length;
+  const noCount   = rsvps.filter(r => r.attending === "no").length;
+  const totalPax  = rsvps.filter(r => r.attending === "yes").reduce((s,r) => s + (r.guests_count||1), 0);
+
   function goAdmin() { setView("admin"); window.location.hash = "admin"; }
-  function goSite()  { setView("site");  window.location.hash = "";      }
+  function goSite()  { setView("site");  window.location.hash = ""; }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // ADMIN — password gate
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Loading ───────────────────────────────────────────────────────────────
+  if (loading) return (
+    <>
+      <style>{CSS}</style>
+      <div className="load-screen">
+        <div className="load-logo">B & R</div>
+        <div className="load-spin" />
+      </div>
+    </>
+  );
+
+  // ── Admin — password gate ─────────────────────────────────────────────────
   if (view === "admin" && !authed) return (
     <>
-      <style>{STYLES}</style>
+      <style>{CSS}</style>
       <div className="pw-gate">
-        <p className="pw-eyebrow">Wedding Admin</p>
-        <h1 className="pw-title">B &amp; R</h1>
-        <p className="pw-sub">Enter the password to continue.</p>
-        <form className="pw-row" onSubmit={handleLogin}>
-          <input className="pw-input" type="password" placeholder="Password" autoFocus
-            value={pwInput} onChange={e => { setPwInput(e.target.value); setPwError(false); }} />
+        <p className="pw-ey">Wedding Admin</p>
+        <h1 className="pw-t">B & R</h1>
+        <p className="pw-s">Enter the admin password to continue.</p>
+        <form className="pw-row" onSubmit={handleAdminLogin}>
+          <input className="pw-i" type="password" placeholder="Password" autoFocus
+            value={pwIn} onChange={e => { setPwIn(e.target.value); setPwErr(false); }} />
           <button type="submit" className="pw-btn">Unlock →</button>
         </form>
-        {pwError && <p className="pw-error">Wrong password — try again.</p>}
+        {pwErr && <p className="pw-err">Wrong password.</p>}
         <button className="pw-back" onClick={goSite}>← Back to site</button>
       </div>
     </>
   );
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // ADMIN — panel
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Admin — panel ─────────────────────────────────────────────────────────
   if (view === "admin" && authed) return (
     <>
-      <style>{STYLES}</style>
+      <style>{CSS}</style>
       <div>
         <div className="adm-bar">
-          <span className="adm-bar-title">Admin Panel</span>
-          <div className="adm-bar-actions">
+          <span className="adm-bar-t">Admin Panel</span>
+          <div className="adm-acts">
             <button className="adm-back" onClick={goSite}>← View Site</button>
-            <button className="adm-logout" onClick={() => { setAuthed(false); setPwInput(""); }}>Log out</button>
+            <button className="adm-out" onClick={() => { setAuthed(false); setPwIn(""); }}>Log out</button>
           </div>
         </div>
-
         <div className="adm-body">
           <div className="adm-inner">
 
-            {/* ── Site Details ── */}
+            {/* Config */}
             <div className="adm-card">
               <h2>Site Details</h2>
-              <div className="adm-grid2">
+              <div className="adm-g2">
                 {[
-                  ["Date (shown on site)",    "dateDisplay", "e.g. June 19, 2027"],
-                  ["Date (countdown ISO)",    "dateISO",     "e.g. 2027-06-19T17:00:00-07:00"],
-                  ["Venue Name",              "venueName",   "e.g. Rutland Centennial Hall"],
-                  ["Venue Address / Tagline", "venueSub",    "e.g. 765 Doyle Ave, Kelowna"],
-                  ["Doors Time",             "doorsTime",   "e.g. 5:00 PM"],
-                  ["Photo Album Link",        "photoLink",   "https://photos.google.com/..."],
+                  ["Date (shown on site)",    "date_display",   "e.g. June 19, 2027"],
+                  ["Date (ISO for countdown)","date_iso",       "e.g. 2027-06-19T17:00:00-07:00"],
+                  ["Venue Name",             "venue_name",     "e.g. Rutland Centennial Hall"],
+                  ["Venue Address",          "venue_sub",      "e.g. 765 Doyle Ave, Kelowna"],
+                  ["Doors Time",             "doors_time",     "e.g. 5:00 PM"],
+                  ["Photo Album Link",        "photo_link",     "https://photos.google.com/..."],
+                  ["Guest RSVP Password",    "guest_password", "What guests enter to RSVP"],
                 ].map(([label, key, ph]) => (
                   <div key={key} className="fg">
-                    <label className="flbl">{label}</label>
-                    <input className="fi" placeholder={ph}
-                      value={editConfig[key]}
-                      onChange={e => setEditConfig({ ...editConfig, [key]: e.target.value })} />
+                    <label className="fl">{label}</label>
+                    <input className="fi" placeholder={ph} value={editCfg[key]||""}
+                      onChange={e => setEditCfg({ ...editCfg, [key]: e.target.value })} />
                   </div>
                 ))}
               </div>
               <button className="adm-save" onClick={saveConfig}>Save Changes</button>
-              {configSaved && <p className="saved-msg">✓ Saved and live!</p>}
+              {cfgSaved && <p className="saved">✓ Saved and live!</p>}
             </div>
 
-            {/* ── Guest List ── */}
+            {/* Guests */}
             <div className="adm-card">
               <h2>Guest List — {guests.length} invited</h2>
               <div className="add-row">
-                <input className="fi" placeholder="Full name..."
-                  value={newGuest}
+                <input className="fi" placeholder="Full name..." value={newGuest}
                   onChange={e => setNewGuest(e.target.value)}
                   onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addGuest(); } }} />
                 <button className="add-btn" onClick={addGuest}>+ Add</button>
               </div>
-              {guests.length === 0 && <p className="gt-empty">No guests added yet. Add them above and they'll appear on the public guest list as ⏳ Pending until they RSVP.</p>}
+              {guests.length === 0 && <p className="adm-empty">No guests yet. Add them above — they'll appear on the public list as ⏳ Pending until they RSVP.</p>}
               {guests.map(g => {
-                const match  = rsvps.find(r => r.name.trim().toLowerCase() === g.name.trim().toLowerCase());
-                const status = match ? match.attending : "pending";
+                const r = getRsvp(g.id);
+                const st = r ? r.attending : "pending";
                 return (
                   <div key={g.id} className="gt-row">
-                    <span className="gt-name">{g.name}</span>
-                    <span className={`gt-badge ${status === "yes" ? "st-yes" : status === "no" ? "st-no" : "st-pending"}`}>
-                      {status === "yes" ? `✓ Coming (+${match?.guests})` : status === "no" ? "✗ Can't make it" : "⏳ Pending"}
+                    <span className="gt-n">{g.name}</span>
+                    <span className={`gt-b ${st==="yes"?"st-y":st==="no"?"st-n":"st-p"}`}>
+                      {st==="yes" ? `✓ Coming (+${r.guests_count})` : st==="no" ? "✗ Can't make it" : "⏳ Pending"}
                     </span>
-                    <button className="rm-btn" onClick={() => removeGuest(g.id)} title="Remove guest">×</button>
+                    {r && <span style={{fontSize:12,color:"#9A98A4",marginRight:10}}>{r.email}</span>}
+                    <button className="rm-btn" onClick={() => removeGuest(g.id)}>×</button>
                   </div>
                 );
               })}
             </div>
 
-            {/* ── RSVPs received ── */}
+            {/* +1 Requests */}
+            {plusReqs.length > 0 && (
+              <div className="adm-card">
+                <h2>+1 Requests — {plusReqs.length} pending</h2>
+                {plusReqs.map(req => (
+                  <div key={req.id} className="p1-row">
+                    <div className="p1-row-top">
+                      <div>
+                        <span style={{fontWeight:700,fontSize:14}}>{req.requester_name}</span>
+                        <span style={{color:"#6B6975",fontSize:14}}> wants to bring </span>
+                        <span style={{fontWeight:700,fontSize:14}}>{req.plus_one_name}</span>
+                      </div>
+                      <div className="p1-acts">
+                        <button className="p1-approve" onClick={() => approvePlusOne(req)}>✓ Approve</button>
+                        <button className="p1-deny"    onClick={() => denyPlusOne(req.id)}>✗ Deny</button>
+                      </div>
+                    </div>
+                    <p className="p1-meta">Requested {new Date(req.created_at).toLocaleDateString("en-CA")}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* RSVPs */}
             <div className="adm-card">
-              <h2>RSVPs — {yesCount} coming · {totalGuests} total guests · {noCount} can't make it</h2>
-              {rsvps.length === 0 && <p className="gt-empty">No RSVPs yet.</p>}
-              {rsvps.map((r, i) => (
-                <div key={i} className="adm-rsvp">
+              <h2>RSVPs — {yesCount} coming · {totalPax} total guests · {noCount} can't make it</h2>
+              {rsvps.length === 0 && <p className="adm-empty">No RSVPs yet.</p>}
+              {rsvps.map(r => (
+                <div key={r.id} className="adm-rsvp">
                   <strong>{r.name}</strong>
-                  <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 700, color: r.attending === "yes" ? "#16a34a" : "#dc2626" }}>
-                    {r.attending === "yes" ? `✓ Coming (+${r.guests})` : "✗ Can't make it"}
+                  <span style={{marginLeft:10,fontSize:12,fontWeight:700,color:r.attending==="yes"?"#16a34a":"#dc2626"}}>
+                    {r.attending==="yes" ? `✓ Coming (+${r.guests_count})` : "✗ Can't make it"}
                   </span>
-                  <span style={{ marginLeft: 10, color: "#9A98A4", fontSize: 12 }}>{r.email}</span>
-                  {r.note && <p style={{ color: "#6B6975", fontSize: 12, fontStyle: "italic", marginTop: 4 }}>"{r.note}"</p>}
+                  <span style={{marginLeft:10,color:"#9A98A4",fontSize:12}}>{r.email}</span>
+                  {r.phone && <span style={{marginLeft:8,color:"#9A98A4",fontSize:12}}> · {r.phone}</span>}
+                  {r.note  && <p style={{color:"#6B6975",fontSize:12,fontStyle:"italic",marginTop:4}}>"{r.note}"</p>}
                 </div>
               ))}
             </div>
@@ -440,63 +524,177 @@ export default function App() {
     </>
   );
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // MAIN SITE
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Site view ─────────────────────────────────────────────────────────────
   return (
     <>
-      <style>{STYLES}</style>
+      <style>{CSS}</style>
+
+      {/* RSVP MODAL */}
+      {modal && (
+        <div className="mo" onClick={e => { if (e.target === e.currentTarget) setModal(null); }}>
+          <div className="mb">
+            <button className="mc" onClick={() => setModal(null)}>×</button>
+
+            {mStep === "pw" && (
+              <form onSubmit={handleMPw}>
+                <h2 className="mt">🔒 Guest access</h2>
+                <p className="ms">Enter the guest password from your invitation to RSVP.</p>
+                <div className="fg">
+                  <label className="fl">Guest password</label>
+                  <input className="fi" type="password" placeholder="••••••••••••" autoFocus
+                    value={mPw} onChange={e => { setMPw(e.target.value); setMPwErr(false); }} />
+                </div>
+                {mPwErr && <p style={{color:"#dc2626",fontSize:13,marginBottom:12}}>Wrong password — check your invite.</p>}
+                <button type="submit" className="btn-primary">Continue →</button>
+              </form>
+            )}
+
+            {mStep === "email" && (
+              <form onSubmit={handleMEmail}>
+                <h2 className="mt">Hi, {modal.name.split(" ")[0]}!</h2>
+                <p className="ms">Enter your email to find or create your RSVP. You can come back and update it any time.</p>
+                <div className="fg">
+                  <label className="fl">Your email</label>
+                  <input className="fi" type="email" placeholder="email@example.com" autoFocus
+                    value={mEmail} onChange={e => setMEmail(e.target.value)} required />
+                </div>
+                <button type="submit" className="btn-primary" disabled={mEmailLoad}>
+                  {mEmailLoad ? "Looking you up..." : "Continue →"}
+                </button>
+              </form>
+            )}
+
+            {mStep === "form" && (
+              <form onSubmit={handleRsvpSubmit}>
+                <h2 className="mt">Your RSVP</h2>
+                <p className="ms">Fill in your details below. You can update this any time before the big day.</p>
+                <div className="fg">
+                  <label className="fl">Name</label>
+                  <input className="fi" placeholder="Your full name" value={mForm.name} required
+                    onChange={e => setMForm({...mForm, name: e.target.value})} />
+                </div>
+                <div className="fg">
+                  <label className="fl">Email</label>
+                  <input className="fi" type="email" value={mForm.email} required readOnly
+                    style={{background:"#F7F4EF",color:"#6B6975"}} />
+                </div>
+                <div className="fg">
+                  <label className="fl">Phone (optional)</label>
+                  <input className="fi" type="tel" placeholder="250-555-0000"
+                    value={mForm.phone} onChange={e => setMForm({...mForm, phone: e.target.value})} />
+                </div>
+                <div className="fg">
+                  <label className="fl">Are you coming?</label>
+                  <div className="att-row">
+                    {[["yes","🕺 Hell yes!","att-y"],["no","😢 Can't make it","att-n"]].map(([v,label,cls]) => (
+                      <button key={v} type="button"
+                        className={`att-btn ${cls} ${mForm.attending===v?"active":""}`}
+                        onClick={() => setMForm({...mForm, attending:v})}>{label}</button>
+                    ))}
+                  </div>
+                </div>
+                {mForm.attending === "yes" && (
+                  <div className="fg">
+                    <label className="fl">How many guests? (including yourself)</label>
+                    <select className="fs" value={mForm.guests_count}
+                      onChange={e => setMForm({...mForm, guests_count: e.target.value})}>
+                      {[1,2,3,4].map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div className="fg">
+                  <label className="fl">Note (optional)</label>
+                  <textarea className="fta" placeholder="Dietary needs, song request, anything..." rows={3}
+                    value={mForm.note} onChange={e => setMForm({...mForm, note: e.target.value})} />
+                </div>
+
+                {/* +1 Request */}
+                {mForm.attending === "yes" && (
+                  <div className="p1-section">
+                    <button type="button"
+                      className={`p1-toggle ${wantP1?"active":""}`}
+                      onClick={() => setWantP1(!wantP1)}>
+                      {wantP1 ? "↑ Never mind" : "＋ Request a +1"}
+                    </button>
+                    {wantP1 && (
+                      <div className="fg">
+                        <label className="fl">Who are you bringing?</label>
+                        <input className="fi" placeholder="Their full name"
+                          value={p1Name} onChange={e => setP1Name(e.target.value)} />
+                        <p style={{fontSize:12,color:"#9A98A4",marginTop:6}}>Bentley & Robyn will approve your request — they'll appear on the guest list once confirmed.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <button type="submit" className="btn-primary" disabled={mLoading} style={{marginTop:24}}>
+                  {mLoading ? "Sending..." : "Send it →"}
+                </button>
+              </form>
+            )}
+
+            {mStep === "done" && (
+              <div className="mdone">
+                <div className="mdone-i">🎉</div>
+                <div className="mdone-t">
+                  {mForm.attending === "yes" ? "You're on the list!" : "Got it."}
+                </div>
+                <div className="mdone-s">
+                  {mForm.attending === "yes"
+                    ? "Can't wait to dance with you. See you on the floor."
+                    : "We'll miss you, but we love you. Thanks for letting us know."}
+                </div>
+                {wantP1 && p1Name && <p style={{marginTop:12,fontSize:13,color:"#9A98A4"}}>Your +1 request for {p1Name} has been sent. We'll let them know when it's approved.</p>}
+                <button className="btn-ghost" onClick={() => setModal(null)}>Close</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* NAV */}
       <nav className="wnav">
-        <span className="wnav-logo" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>B &amp; R</span>
+        <span className="wnav-logo" onClick={() => window.scrollTo({top:0,behavior:"smooth"})}>B & R</span>
         <div className="wnav-links">
-          <button className="wnav-link" onClick={() => go("vibe")}>The Vibe</button>
-          <button className="wnav-link" onClick={() => go("details")}>Details</button>
-          {publicList.length > 0 && <button className="wnav-link" onClick={() => go("guestlist")}>Guest List</button>}
-          <button className="wnav-link" onClick={() => go("rsvp")}>RSVP</button>
+          <button className="wnl" onClick={() => go("vibe")}>The Vibe</button>
+          <button className="wnl" onClick={() => go("details")}>Details</button>
+          {guests.length > 0 && <button className="wnl" onClick={() => go("guestlist")}>Guest List</button>}
         </div>
       </nav>
 
       {/* HERO */}
-      <section id="hero" className="hero">
+      <section className="hero">
         <div className="hero-eq">
-          {EQ_BARS.map((b, i) => (
-            <div key={i} className="eq-b"
-              style={{ animation: `${b.anim} ${b.dur} ${b.delay} ease-in-out infinite` }} />
-          ))}
+          {EQ.map((b,i) => <div key={i} className="eq-b" style={{animation:`${b.a} ${b.d} ${b.dl} ease-in-out infinite`}} />)}
         </div>
-        <p className="hero-eyebrow wu">best friends 4 eva 💛</p>
-        <h1 className="hero-title wu wu1">BENTLEY<br /><span className="amp">&amp;</span><br />ROBYN</h1>
-        <p className="hero-sub wu wu2">{config.dateDisplay} &nbsp;·&nbsp; {config.venueName}</p>
+        <p className="hero-ey wu">best friends 4 eva 💛</p>
+        <h1 className="hero-t wu wu1">BENTLEY<br /><span className="amp">&amp;</span><br />ROBYN</h1>
+        <p className="hero-s wu wu2">{cfg.date_display} &nbsp;·&nbsp; {cfg.venue_name}</p>
         <div className="cd-row wu wu3">
-          {[["days", tl.days], ["hours", tl.hours], ["mins", tl.minutes], ["secs", tl.seconds]].map(([lbl, val]) => (
-            <div key={lbl} className="cd-box">
-              <div className="cd-num">{String(val).padStart(2, "0")}</div>
-              <div className="cd-lbl">{lbl}</div>
-            </div>
+          {[["days",tl.days],["hours",tl.hours],["mins",tl.minutes],["secs",tl.seconds]].map(([l,v]) => (
+            <div key={l} className="cd-box"><div className="cd-n">{pad(v)}</div><div className="cd-l">{l}</div></div>
           ))}
         </div>
-        <button className="cta wu wu4" onClick={() => go("rsvp")}>Count me in →</button>
-        <div className="scroll-hint">↓</div>
+        <button className="cta wu wu4" onClick={() => go("guestlist")}>Find my name →</button>
+        <div className="sh">↓</div>
       </section>
 
       {/* VIBE */}
       <section id="vibe" className="wsec">
-        <div className="wsec-inner">
-          <p className="eyebrow">what to expect</p>
-          <h2 className="sec-title">We're keeping it exactly<br /><span className="acc">what it is.</span></h2>
+        <div className="wi">
+          <p className="ey">what to expect</p>
+          <h2 className="st">We're keeping it exactly<br /><span className="acc">what it is.</span></h2>
           <div className="vibe-grid">
             {[
-              { icon: "🕺", title: "Dancing",    body: "Music from the moment doors open. Spotify, a request tablet, and a floor that IS the event. Come ready to move." },
-              { icon: "🍕", title: "Good Eats",  body: "A proper spread of things you actually want to eat standing up. No sit-down dinner, no formalities." },
-              { icon: "🍺", title: "Drinks",     body: "Toonie bar. Beer, wine, seltzers. Simple, social, sorted." },
-              { icon: "💛", title: "Each Other", body: "No lengthy speeches, no stuffy rituals. Just our favourite people in one room having an actual good time." },
+              {icon:"🕺",title:"Dancing",    body:"Music from the moment doors open. Spotify, a request tablet, and a floor that IS the event."},
+              {icon:"🍕",title:"Good Eats",  body:"A proper spread of things you actually want to eat standing up. No sit-down dinner, no formalities."},
+              {icon:"🍺",title:"Drinks",     body:"Toonie bar. Beer, wine, seltzers. Simple, social, sorted."},
+              {icon:"💛",title:"Each Other", body:"No lengthy speeches, no stuffy rituals. Just our favourite people in one room having an actual good time."},
             ].map(c => (
-              <div key={c.title} className="vibe-card">
-                <span className="vibe-icon">{c.icon}</span>
-                <div className="vibe-title">{c.title}</div>
-                <div className="vibe-body">{c.body}</div>
+              <div key={c.title} className="vc">
+                <span className="vi">{c.icon}</span>
+                <div className="vt">{c.title}</div>
+                <div className="vb">{c.body}</div>
               </div>
             ))}
           </div>
@@ -505,25 +703,25 @@ export default function App() {
 
       {/* DETAILS */}
       <section id="details" className="wsec wsec-alt">
-        <div className="wsec-inner">
-          <p className="eyebrow">the details</p>
-          <h2 className="sec-title">Save the date.</h2>
-          <div className="detail-grid">
+        <div className="wi">
+          <p className="ey">the details</p>
+          <h2 className="st">Save the date.</h2>
+          <div className="dg">
             {[
-              { lbl: "📅 When",  val: config.dateDisplay, sub: "Saturday — confirmed once the hall is locked" },
-              { lbl: "📍 Where", val: config.venueName,   sub: config.venueSub },
-              { lbl: "⏰ Doors", val: config.doorsTime,   sub: "Come ready to dance" },
+              {lbl:"📅 When",  val:cfg.date_display, sub:"Saturday — confirmed once the hall is locked"},
+              {lbl:"📍 Where", val:cfg.venue_name,   sub:cfg.venue_sub},
+              {lbl:"⏰ Doors", val:cfg.doors_time,   sub:"Come ready to dance"},
             ].map(d => (
-              <div key={d.lbl} className="d-card">
-                <div className="d-lbl">{d.lbl}</div>
-                <div className="d-val">{d.val}</div>
-                <div className="d-sub">{d.sub}</div>
+              <div key={d.lbl} className="dc">
+                <div className="dl">{d.lbl}</div>
+                <div className="dv">{d.val}</div>
+                <div className="ds">{d.sub}</div>
               </div>
             ))}
           </div>
-          <div className="d-note">
-            <p style={{ fontSize: 14, color: "#6B6975", lineHeight: 1.75 }}>
-              <span style={{ color: "#D97316", fontWeight: 700 }}>Dress code:</span>{" "}
+          <div className="dn">
+            <p style={{fontSize:14,color:"#6B6975",lineHeight:1.75}}>
+              <span style={{color:"#D97316",fontWeight:700}}>Dress code:</span>{" "}
               Whatever you want to dance in. Nice casual is the vibe — leave the heels at home if you actually plan to move.
             </p>
           </div>
@@ -531,92 +729,54 @@ export default function App() {
       </section>
 
       {/* PHOTOS */}
-      {config.photoLink && (
-        <section id="photos" className="wsec">
-          <div className="wsec-inner">
-            <p className="eyebrow">photos</p>
-            <h2 className="sec-title">Captured moments.</h2>
-            <a href={config.photoLink} target="_blank" rel="noopener noreferrer" className="photo-btn">
-              📸 View the Album →
-            </a>
+      {cfg.photo_link && (
+        <section className="wsec">
+          <div className="wi">
+            <p className="ey">photos</p>
+            <h2 className="st">Captured moments.</h2>
+            <a href={cfg.photo_link} target="_blank" rel="noopener noreferrer" className="photo-btn">📸 View the Album →</a>
           </div>
         </section>
       )}
 
       {/* GUEST LIST */}
-      {publicList.length > 0 && (
+      {guests.length > 0 && (
         <section id="guestlist" className="wsec wsec-alt">
-          <div className="wsec-inner">
-            <p className="eyebrow">who's coming</p>
-            <h2 className="sec-title">The guest list.</h2>
+          <div className="wi">
+            <p className="ey">who's coming</p>
+            <h2 className="st">The guest list.</h2>
             <div className="gl-grid">
-              {publicList.map((g, i) => (
-                <div key={g.id || i} className="gl-item">
-                  <span className="gl-name">{g.name}</span>
-                  <span className={`gl-badge ${g.status === "yes" ? "gb-yes" : g.status === "no" ? "gb-no" : "gb-pending"}`}>
-                    {g.status === "yes" ? "💃 Coming" : g.status === "no" ? "🥺 Can't make it" : "⏳ Pending"}
-                  </span>
-                </div>
-              ))}
+              {guests.map(g => {
+                const r  = getRsvp(g.id);
+                const st = r ? r.attending : "pending";
+                return (
+                  <div key={g.id} className="gl-card">
+                    <span className="gl-name">{g.name}</span>
+                    {r && (
+                      <span className={`gl-badge ${st==="yes"?"gb-y":st==="no"?"gb-n":"gb-p"}`}>
+                        {st==="yes" ? "💃 Coming" : st==="no" ? "🥺 Can't make it" : "⏳ Pending"}
+                      </span>
+                    )}
+                    {st === "pending"
+                      ? <button className="rsvp-btn" onClick={() => openModal(g)}>RSVP →</button>
+                      : <button className="rsvp-btn-done" onClick={() => openModal(g)}>Update</button>
+                    }
+                  </div>
+                );
+              })}
             </div>
+            <p style={{marginTop:24,fontSize:13,color:"#9A98A4",textAlign:"center"}}>
+              Don't see your name? Ask Bentley or Robyn to add you to the list.
+            </p>
           </div>
         </section>
       )}
-
-      {/* RSVP */}
-      <section id="rsvp" className="wsec">
-        <div className="rsvp-wrap">
-          <p className="eyebrow">are you in?</p>
-          <h2 className="sec-title">RSVP</h2>
-          {subDone ? (
-            <div className="ok-box">
-              <div className="ok-icon">🎉</div>
-              <div className="ok-title">You're on the list.</div>
-              <div className="ok-sub">{form.attending === "yes" ? "Can't wait to dance with you." : "We'll miss you, but we love you."}</div>
-              <button className="ghost" onClick={() => { setSubDone(false); setForm({ name: "", email: "", attending: "yes", guests: "1", note: "" }); }}>
-                Submit another RSVP
-              </button>
-            </div>
-          ) : (
-            <form onSubmit={handleRsvp}>
-              <div className="fg">
-                <label className="flbl">Your Name</label>
-                <input required className="fi" placeholder="Full name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-              </div>
-              <div className="fg">
-                <label className="flbl">Email</label>
-                <input required type="email" className="fi" placeholder="email@example.com" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
-              </div>
-              <div className="fg">
-                <label className="flbl">Can you make it?</label>
-                <select className="fs" value={form.attending} onChange={e => setForm({ ...form, attending: e.target.value })}>
-                  <option value="yes">🕺 Hell yes, I'm coming</option>
-                  <option value="no">😢 Can't make it this time</option>
-                </select>
-              </div>
-              {form.attending === "yes" && (
-                <div className="fg">
-                  <label className="flbl">Guests (including yourself)</label>
-                  <select className="fs" value={form.guests} onChange={e => setForm({ ...form, guests: e.target.value })}>
-                    {[1,2,3,4].map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </div>
-              )}
-              <div className="fg">
-                <label className="flbl">Note (optional)</label>
-                <textarea className="fta" placeholder="Say something nice..." rows={3} value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} />
-              </div>
-              <button type="submit" className="sub-btn" disabled={loading}>{loading ? "Sending..." : "Send it →"}</button>
-            </form>
-          )}
-        </div>
-      </section>
 
       {/* FOOTER */}
       <footer className="wfooter">
         <div className="wf-logo">Bentley &amp; Robyn</div>
         <div className="wf-sub">June 2027 · Kelowna, BC · best friends 4 eva</div>
-        <button className="admin-btn" onClick={goAdmin}>Admin</button>
+        <button className="adm-link" onClick={goAdmin}>Admin</button>
       </footer>
     </>
   );
