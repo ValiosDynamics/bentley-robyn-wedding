@@ -167,6 +167,8 @@ const CSS = `
   .add-btn{background:#1C1A22;color:white;border:none;border-radius:10px;padding:0 20px;font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap;transition:background .2s;}
   .add-btn:hover{background:#3C3A42;}
   .gt-row{display:flex;align-items:center;padding:10px 0;border-bottom:1px solid rgba(28,26,34,.06);gap:8px;flex-wrap:wrap;}
+  .gt-edit-row{display:flex;align-items:center;padding:10px 0;border-bottom:1px solid rgba(28,26,34,.06);gap:8px;flex-wrap:wrap;background:rgba(255,107,53,.04);border-radius:8px;}
+  .gt-edit-row .fi{flex:1;min-width:120px;padding:8px 12px;font-size:13px;}
   .gt-n{flex:1;font-size:14px;font-weight:600;}
   .gt-b{font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;margin-right:10px;}
   .st-y{background:rgba(34,197,94,.1);color:#16a34a;}
@@ -219,6 +221,8 @@ export default function App() {
   const [pwIn, setPwIn] = useState("");
   const [pwErr, setPwErr] = useState(false);
   const [newGuest, setNewGuest] = useState({ name: "", relation: "", email: "", phone: "" });
+  const [editingGuestId, setEditingGuestId] = useState(null);
+  const [editGuestForm, setEditGuestForm] = useState({ name: "", relation: "", email: "", phone: "" });
   const [cfgSaved, setCfgSaved] = useState(false);
 
   const [modal, setModal] = useState(null);
@@ -317,6 +321,29 @@ export default function App() {
   async function removeGuest(id) {
     await supabase.from("guests").delete().eq("id", id);
     setGuests(prev => prev.filter(g => g.id !== id));
+  }
+
+  function startEditGuest(g) {
+    setEditingGuestId(g.id);
+    setEditGuestForm({ name: g.name, relation: g.relation || "", email: g.email || "", phone: g.phone || "" });
+  }
+
+  function cancelEditGuest() {
+    setEditingGuestId(null);
+  }
+
+  async function saveEditGuest(id) {
+    const name = editGuestForm.name.trim();
+    if (!name) return;
+    const updates = {
+      name,
+      relation: editGuestForm.relation.trim(),
+      email: editGuestForm.email.trim(),
+      phone: editGuestForm.phone.trim() || null,
+    };
+    await supabase.from("guests").update(updates).eq("id", id);
+    setGuests(prev => prev.map(g => g.id === id ? { ...g, ...updates } : g).sort((a, b) => a.name.localeCompare(b.name)));
+    setEditingGuestId(null);
   }
 
   async function approvePlusOne(req) {
@@ -446,14 +473,32 @@ export default function App() {
               </div>
               {guests.length === 0 && <p className="adm-empty">No guests yet. Add them above — they'll appear on the public list as ⏳ Pending until they RSVP.</p>}
               {guests.map(g => (
-                <div key={g.id} className="gt-row">
-                  <span className="gt-n">{g.name}{g.relation ? <span style={{ color: "#9A98A4", fontWeight: 400 }}> · {g.relation}</span> : null}</span>
-                  <span className={`gt-b ${g.rsvp_status === "coming" ? "st-y" : g.rsvp_status === "not_coming" ? "st-n" : "st-p"}`}>
-                    {g.rsvp_status === "coming" ? "✓ Coming" : g.rsvp_status === "not_coming" ? "✗ Can't make it" : "⏳ Pending"}
-                  </span>
-                  {g.email && <span style={{ fontSize: 12, color: "#9A98A4" }}>{g.email}</span>}
-                  <button className="rm-btn" onClick={() => removeGuest(g.id)}>×</button>
-                </div>
+                editingGuestId === g.id ? (
+                  <div key={g.id} className="gt-edit-row">
+                    <input className="fi" placeholder="Full name" value={editGuestForm.name}
+                      onChange={e => setEditGuestForm({ ...editGuestForm, name: e.target.value })} />
+                    <input className="fi" placeholder="Relation" value={editGuestForm.relation}
+                      onChange={e => setEditGuestForm({ ...editGuestForm, relation: e.target.value })} />
+                    <input className="fi" placeholder="Email" value={editGuestForm.email}
+                      onChange={e => setEditGuestForm({ ...editGuestForm, email: e.target.value })} />
+                    <input className="fi" placeholder="Phone" value={editGuestForm.phone}
+                      onChange={e => setEditGuestForm({ ...editGuestForm, phone: e.target.value })} />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button className="add-btn" onClick={() => saveEditGuest(g.id)}>Save</button>
+                      <button className="rsvp-btn" onClick={cancelEditGuest}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div key={g.id} className="gt-row">
+                    <span className="gt-n">{g.name}{g.relation ? <span style={{ color: "#9A98A4", fontWeight: 400 }}> · {g.relation}</span> : null}</span>
+                    <span className={`gt-b ${g.rsvp_status === "coming" ? "st-y" : g.rsvp_status === "not_coming" ? "st-n" : "st-p"}`}>
+                      {g.rsvp_status === "coming" ? "✓ Coming" : g.rsvp_status === "not_coming" ? "✗ Can't make it" : "⏳ Pending"}
+                    </span>
+                    {g.email && <span style={{ fontSize: 12, color: "#9A98A4" }}>{g.email}</span>}
+                    <button className="rsvp-btn" style={{ marginRight: 4 }} onClick={() => startEditGuest(g)}>Edit</button>
+                    <button className="rm-btn" onClick={() => removeGuest(g.id)}>×</button>
+                  </div>
+                )
               ))}
             </div>
 
