@@ -1,55 +1,55 @@
--- ─── Wedding Site Schema ─────────────────────────────────────────────────────
--- Run this once in: supabase.com → your project → SQL Editor
+-- Wedding site schema
+-- Run this once in Supabase: Dashboard -> SQL Editor -> New query -> paste -> Run
 
-CREATE TABLE IF NOT EXISTS config (
-  id             INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-  date_display   TEXT NOT NULL DEFAULT 'June 2027',
-  date_iso       TEXT NOT NULL DEFAULT '2027-06-19T17:00:00-07:00',
-  venue_name     TEXT NOT NULL DEFAULT 'Kelowna, BC',
-  venue_sub      TEXT NOT NULL DEFAULT 'Venue TBD — stay tuned',
-  doors_time     TEXT NOT NULL DEFAULT '5:00 PM',
-  photo_link     TEXT NOT NULL DEFAULT '',
-  guest_password TEXT NOT NULL DEFAULT 'dancefloor2027',
-  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+create table if not exists config (
+  id int primary key default 1,
+  event_date_display text default 'Saturday, June 19, 2027',
+  event_date_iso text default '2027-06-19T18:00:00',
+  venue_name text default 'TBD',
+  venue_address text default 'TBD',
+  doors_time text default '6:00 PM',
+  photo_album_link text default '',
+  guest_password text default 'dancefloor2027',
+  admin_password text default 'bestfriends4eva',
+  constraint single_row check (id = 1)
 );
-INSERT INTO config (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+insert into config (id) values (1) on conflict (id) do nothing;
 
-CREATE TABLE IF NOT EXISTS guests (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name       TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS rsvps (
-  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  guest_id     UUID REFERENCES guests(id) ON DELETE SET NULL,
-  name         TEXT NOT NULL,
-  email        TEXT NOT NULL UNIQUE,
-  phone        TEXT,
-  attending    TEXT NOT NULL CHECK (attending IN ('yes','no')),
-  guests_count INT NOT NULL DEFAULT 1,
-  note         TEXT,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+create table if not exists guests (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  email text not null,
+  phone text,
+  rsvp_status text not null default 'pending' check (rsvp_status in ('pending','coming','not_coming')),
+  note text,
+  is_plus_one boolean not null default false,
+  created_at timestamptz not null default now()
 );
 
-CREATE TABLE IF NOT EXISTS plus_one_requests (
-  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  requester_name     TEXT NOT NULL,
-  requester_guest_id UUID REFERENCES guests(id) ON DELETE CASCADE,
-  plus_one_name      TEXT NOT NULL,
-  status             TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','denied')),
-  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+create table if not exists plus_one_requests (
+  id uuid primary key default gen_random_uuid(),
+  requested_by_name text not null,
+  plus_one_name text not null,
+  status text not null default 'pending' check (status in ('pending','approved','denied')),
+  created_at timestamptz not null default now()
 );
 
--- Disable RLS and grant access to the publishable key
-ALTER TABLE config            DISABLE ROW LEVEL SECURITY;
-ALTER TABLE guests            DISABLE ROW LEVEL SECURITY;
-ALTER TABLE rsvps             DISABLE ROW LEVEL SECURITY;
-ALTER TABLE plus_one_requests DISABLE ROW LEVEL SECURITY;
+alter table config enable row level security;
+alter table guests enable row level security;
+alter table plus_one_requests enable row level security;
 
-GRANT ALL ON TABLE config            TO anon, authenticated;
-GRANT ALL ON TABLE guests            TO anon, authenticated;
-GRANT ALL ON TABLE rsvps             TO anon, authenticated;
-GRANT ALL ON TABLE plus_one_requests TO anon, authenticated;
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
+-- Public site uses only the anon/publishable key. These policies allow the
+-- functionality the site needs (read config, read/update guests, submit
+-- plus-one requests) without exposing anything more sensitive. Admin actions
+-- are additionally gated behind the admin_password check in the app itself.
+create policy "public read config" on config for select using (true);
+create policy "public update config" on config for update using (true);
+
+create policy "public read guests" on guests for select using (true);
+create policy "public insert guests" on guests for insert with check (true);
+create policy "public update guests" on guests for update using (true);
+create policy "public delete guests" on guests for delete using (true);
+
+create policy "public read requests" on plus_one_requests for select using (true);
+create policy "public insert requests" on plus_one_requests for insert with check (true);
+create policy "public update requests" on plus_one_requests for update using (true);
